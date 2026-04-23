@@ -112,7 +112,9 @@ estilos = {
     2026: dict(color="#e34e26", dash="solid", width=5.5)
 }
 
-fecha_inicio, fecha_fin = datetime(2026, 3, 22), datetime(2026, 4, 22)
+# --- RANGO DE FECHAS AUTOMÁTICO (Cubre 1 mes hasta hoy) ---
+fecha_fin = datetime.now() + timedelta(days=1) # Un día más para ver el punto de hoy
+fecha_inicio = fecha_fin - timedelta(days=32)
 
 for ano in st.session_state.anios_visibles:
     df_a = df_raw[df_raw['Año'] == ano].sort_values('Fecha_Visual')
