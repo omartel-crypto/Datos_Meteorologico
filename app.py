@@ -115,12 +115,13 @@ estilos = {
 fecha_fin = datetime.now()
 fecha_inicio = fecha_fin - timedelta(days=31)
 
-# ─── LÓGICA PARA LÍNEAS DE DOMINGO (Inicio de Semana) ───
+# ─── NUEVA LÓGICA REFORZADA PARA LÍNEAS DE DOMINGO ───
 curr = fecha_inicio
 while curr <= fecha_fin:
-    if curr.weekday() == 6:  # 6 es Domingo en Python
-        # Se agrega la línea vertical a todo el gráfico
-        fig.add_vline(x=curr.strftime("%Y-%m-%d"), line_width=1.5, line_dash="dash", line_color="#D3D3D3")
+    if curr.weekday() == 6:  # 6 es Domingo
+        # Usamos el objeto datetime directamente para la posición X
+        pos_x = curr.replace(hour=0, minute=0, second=0, microsecond=0)
+        fig.add_vline(x=pos_x, line_width=2, line_dash="dash", line_color="black", opacity=0.2)
     curr += timedelta(days=1)
 
 for ano in st.session_state.anios_visibles:
