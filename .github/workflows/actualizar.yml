@@ -1,0 +1,31 @@
+name: Actualizacion Automatica Diaria
+on:
+  schedule:
+    - cron: '0 11 * * *' # Esto es 6:00 AM hora Perú
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del codigo
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Instalar librerias
+        run: pip install pandas requests
+
+      - name: Ejecutar script de carga
+        run: python actualizar_datos.py
+
+      - name: Guardar cambios en el CSV
+        run: |
+          git config --global user.name 'Bot de Los Brujos'
+          git config --global user.email 'bot@brujos.com'
+          git add datos_actualizados.csv
+          git commit -m "Data actualizada automaticamente por el Robot" || exit 0
+          git push
