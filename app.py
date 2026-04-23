@@ -119,7 +119,8 @@ fecha_inicio = fecha_fin - timedelta(days=31)
 curr = fecha_inicio
 while curr <= fecha_fin:
     if curr.weekday() == 6:  # 6 es Domingo en Python
-        fig.add_vline(x=curr.timestamp() * 1000, line_width=1, line_dash="dash", line_color="#E0E0E0")
+        # Se agrega la línea vertical a todo el gráfico
+        fig.add_vline(x=curr.strftime("%Y-%m-%d"), line_width=1.5, line_dash="dash", line_color="#D3D3D3")
     curr += timedelta(days=1)
 
 for ano in st.session_state.anios_visibles:
