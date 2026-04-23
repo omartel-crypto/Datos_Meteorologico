@@ -114,7 +114,7 @@ estilos = {
 
 # --- RANGO DE FECHAS AUTOMÁTICO (Cubre 1 mes hasta hoy) ---
 fecha_fin = datetime.now()
-fecha_inicio = fecha_fin - timedelta(days=30)
+fecha_inicio = fecha_fin - timedelta(days=31)
 
 for ano in st.session_state.anios_visibles:
     df_a = df_raw[df_raw['Año'] == ano].sort_values('Fecha_Visual')
