@@ -78,11 +78,11 @@ if st.button("🔄 ACTUALIZAR DATOS (API VIVO + CSV)", use_container_width=True,
 
 df_raw = cargar_todo()
 
-# --- ESTILO CSS: MARCO SUAVE Y TÍTULO ---
+# --- ESTILO CSS ---
 st.markdown("""
     <style>
     .report-card {
-        border: 1px solid #E0E0E0; /* Gris suave, no invasivo */
+        border: 1px solid #E0E0E0;
         border-radius: 12px;
         padding: 25px;
         background-color: #FFFFFF;
@@ -99,7 +99,6 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- CUERPO DEL REPORTE ---
 st.markdown('<div class="report-card">', unsafe_allow_html=True)
 st.markdown("<h2 class='red-title'>HISTÓRICO DE TEMPERATURA DIARIA (MAX-MIN) — LOS BRUJOS</h2>", unsafe_allow_html=True)
 
@@ -112,16 +111,22 @@ estilos = {
     2026: dict(color="#e34e26", dash="solid", width=5.5)
 }
 
-# --- RANGO DE FECHAS AUTOMÁTICO (Cubre 1 mes hasta hoy) ---
+# --- RANGO DE FECHAS AUTOMÁTICO ---
 fecha_fin = datetime.now()
 fecha_inicio = fecha_fin - timedelta(days=31)
+
+# ─── LÓGICA PARA LÍNEAS DE DOMINGO (Inicio de Semana) ───
+curr = fecha_inicio
+while curr <= fecha_fin:
+    if curr.weekday() == 6:  # 6 es Domingo en Python
+        fig.add_vline(x=curr.timestamp() * 1000, line_width=1, line_dash="dash", line_color="#E0E0E0")
+    curr += timedelta(days=1)
 
 for ano in st.session_state.anios_visibles:
     df_a = df_raw[df_raw['Año'] == ano].sort_values('Fecha_Visual')
     if df_a.empty: continue
     est = estilos.get(ano)
     
-    # Tooltip Negrita
     fig.add_trace(go.Scatter(x=df_a['Fecha_Visual'], y=df_a["Max_Dia"], name=f"Año {ano}",
                              line=dict(color=est['color'], width=est['width'], dash=est['dash']),
                              legendgroup=f"g{ano}", 
@@ -132,24 +137,21 @@ for ano in st.session_state.anios_visibles:
                              legendgroup=f"g{ano}", showlegend=False, 
                              hovertemplate="<b>Año "+str(ano)+"</b>: <b>%{y}°C</b><extra></extra>"), row=2, col=1)
 
-# Etiquetas de panel
 fig.add_annotation(dict(x=0, y=1.06, xref="paper", yref="paper", text="<b> MÁXIMA °C </b>", showarrow=False, font=dict(color="white", size=12), bgcolor="#000", borderpad=5))
 fig.add_annotation(dict(x=0, y=0.46, xref="paper", yref="paper", text="<b> MÍNIMA °C </b>", showarrow=False, font=dict(color="white", size=12), bgcolor="#000", borderpad=5))
 
-# --- EJES SUAVES PERO CON TEXTO FUERTE (BOLD) ---
 fig.update_xaxes(
     showline=True, linewidth=1, linecolor='#CCC', mirror=True, gridcolor="#F5F5F5", 
     tickformat="%d-%b", tickangle=-45, tickmode='linear', dtick=86400000.0, 
     range=[fecha_inicio, fecha_fin],
-    tickfont=dict(family='Arial', size=12, color='#333', weight='bold') # Negrita en fechas
+    tickfont=dict(family='Arial', size=12, color='#333', weight='bold')
 )
 
 fig.update_yaxes(
     showline=True, linewidth=1, linecolor='#CCC', mirror=True, gridcolor="#F5F5F5",
-    tickfont=dict(family='Arial', size=12, color='#333', weight='bold') # Negrita en grados
+    tickfont=dict(family='Arial', size=12, color='#333', weight='bold')
 )
 
-# --- CONFIGURACIÓN FINAL ---
 fig.update_layout(
     height=850, 
     hovermode="x unified", 
