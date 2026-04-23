@@ -102,19 +102,7 @@ st.markdown("""
 st.markdown('<div class="report-card">', unsafe_allow_html=True)
 st.markdown("<h2 class='red-title'>HISTÓRICO DE TEMPERATURA DIARIA (MAX-MIN) — LOS BRUJOS</h2>", unsafe_allow_html=True)
 
-fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1)
-
-# --- RANGO DE FECHAS AUTOMÁTICO ---
-fecha_fin = datetime.now()
-fecha_inicio = fecha_fin - timedelta(days=31)
-
-# ─── AGREGAR LÍNEAS VERTICALES DE DOMINGO (REMARCADAS) ───
-curr = fecha_inicio
-while curr <= fecha_fin:
-    if curr.weekday() == 6:  # 6 es Domingo
-        # Agregamos la línea a ambos subplots (fila 1 y fila 2)
-        fig.add_vline(x=curr.strftime("%Y-%m-%d"), line_width=1.5, line_dash="dash", line_color="#888888", opacity=0.5)
-    curr += timedelta(days=1)
+fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, subplot_titles=("", ""))
 
 estilos = {
     2023: dict(color="#fdb913", dash="dot", width=2.5),
@@ -122,6 +110,17 @@ estilos = {
     2025: dict(color="#00a19a", dash="dashdot", width=2.5),
     2026: dict(color="#e34e26", dash="solid", width=5.5)
 }
+
+# --- RANGO DE FECHAS AUTOMÁTICO ---
+fecha_fin = datetime.now()
+fecha_inicio = fecha_fin - timedelta(days=31)
+
+# ─── LÓGICA PARA LÍNEAS DE DOMINGO (Inicio de Semana) ───
+curr = fecha_inicio
+while curr <= fecha_fin:
+    if curr.weekday() == 6:  # 6 es Domingo en Python
+        fig.add_vline(x=curr.timestamp() * 1000, line_width=1, line_dash="dash", line_color="#E0E0E0")
+    curr += timedelta(days=1)
 
 for ano in st.session_state.anios_visibles:
     df_a = df_raw[df_raw['Año'] == ano].sort_values('Fecha_Visual')
@@ -148,14 +147,19 @@ fig.update_xaxes(
     tickfont=dict(family='Arial', size=12, color='#333', weight='bold')
 )
 
-fig.update_yaxes(showline=True, linewidth=1, linecolor='#CCC', mirror=True, gridcolor="#F5F5F5",
-                 tickfont=dict(family='Arial', size=12, color='#333', weight='bold'))
+fig.update_yaxes(
+    showline=True, linewidth=1, linecolor='#CCC', mirror=True, gridcolor="#F5F5F5",
+    tickfont=dict(family='Arial', size=12, color='#333', weight='bold')
+)
 
 fig.update_layout(
-    height=850, hovermode="x unified", plot_bgcolor="white", 
+    height=850, 
+    hovermode="x unified", 
+    plot_bgcolor="white", 
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    hoverlabel=dict(bgcolor="#1a1a1a", font_size=15, font_color="white", font_family="Arial"),
     margin=dict(l=20, r=20, t=80, b=20)
 )
 
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'displaylogo': False})
 st.markdown('</div>', unsafe_allow_html=True)
