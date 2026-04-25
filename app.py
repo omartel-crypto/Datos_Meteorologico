@@ -5,13 +5,40 @@ from datetime import datetime, timedelta
 import requests
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(layout="wide", page_title="Dashboard Los Brujos", page_icon="🌡️")
+st.set_page_config(layout="wide", page_title="Dashboard Meteorológico", page_icon="🌡️")
+
+# --- CONFIGURACIÓN DE FUNDOS ---
+CONFIG_FUNDOS = {
+    "Los Brujos": {
+        "user_v1": "001D0A808AB7",
+        "csv_file": "datos_actualizados.csv",
+        "color": "#E34E26"
+    },
+    "Yaurilla": {
+        "user_v1": "001D0A80A25D",
+        "csv_file": "datos_yaurilla.csv",
+        "color": "#1E88E5"
+    }
+}
+
+# ─── SIDEBAR: SELECCIÓN DE FUNDO ───
+st.sidebar.title("Configuración")
+
+# AGREGADO: Carga del logo local desde tu carpeta
+st.sidebar.image("logo_fundo.png", use_container_width=True)
+
+fundo_sel = st.sidebar.selectbox("📍 Seleccione el Fundo:", list(CONFIG_FUNDOS.keys()))
+conf = CONFIG_FUNDOS[fundo_sel]
 
 # ─── FUNCIÓN API (V1) ───
 def obtener_datos_v1():
     try:
         url = "https://api.weatherlink.com/v1/NoaaExt.json"
-        params = {"user": "001D0A808AB7", "pass": "brujos", "apiToken": "23E4C51FA37B4F4091444AB50D1D5015"}
+        params = {
+            "user": conf["user_v1"], 
+            "pass": "brujos", 
+            "apiToken": "23E4C51FA37B4F4091444AB50D1D5015"
+        }
         r = requests.get(url, params=params, timeout=10)
         data = r.json()
         obs = data.get("davis_current_observation", {})
@@ -28,7 +55,6 @@ def obtener_datos_v1():
             "hora":       data.get("observation_time")
         }
 
-        # Captura de extremos para el DF
         max_f = obs.get("temp_day_high_f")
         min_f = obs.get("temp_day_low_f")
         max_c = round((float(max_f) - 32) * 5 / 9, 1) if max_f else 0
@@ -36,7 +62,6 @@ def obtener_datos_v1():
         max_h = obs.get("relative_humidity_day_high", resumen["hum_act"])
         min_h = obs.get("relative_humidity_day_low",  resumen["hum_act"])
 
-        # CAPTURA DE HORAS DE RÉCORDS
         horas_records = {
             "Max_Dia": obs.get("temp_day_high_time"),
             "Min_Dia": obs.get("temp_day_low_time"),
@@ -58,12 +83,11 @@ def obtener_datos_v1():
         return None, None, {}
 
 @st.cache_data(ttl=300)
-def cargar_todo():
+def cargar_todo(fundo):
     try:
-        df = pd.read_csv("datos_actualizados.csv", encoding="utf-8-sig")
-        if 'Anio' in df.columns:
-            df = df.rename(columns={'Anio': 'Año'})
-        df['Fecha_Grafico'] = pd.to_datetime(df['Fecha_Grafico'])
+        df = pd.read_csv(CONFIG_FUNDOS[fundo]["csv_file"], encoding="utf-8-sig")
+        if 'Anio' in df.columns: df = df.rename(columns={'Anio': 'Año'})
+        df['Fecha_Grafico'] = pd.to_datetime(df['Fecha_Grafico'], dayfirst=True)
         df['Fecha_Visual']  = df['Fecha_Grafico'].apply(lambda x: x.replace(year=2026))
         
         resumen, df_hoy, horas_records = obtener_datos_v1()
@@ -75,16 +99,17 @@ def cargar_todo():
     except:
         return pd.DataFrame(), None, {}
 
-df_raw, resumen, horas_records = cargar_todo()
+# ─── CARGA DE DATOS ───
+df_raw, resumen, horas_records = cargar_todo(fundo_sel)
 
 # ─── ESTILOS GLOBALES ───
-estilos = {2023: "#fdb913", 2024: "#8cc63f", 2025: "#00a19a", 2026: "#e34e26"}
+estilos = {2023: "#fdb913", 2024: "#8cc63f", 2025: "#00a19a", 2026: conf["color"]}
 dashes  = {2023: "dot",     2024: "dash",    2025: "dashdot", 2026: "solid"}
 fecha_fin    = datetime.now()
 fecha_inicio = fecha_fin - timedelta(days=31)
 
 # ─── ENCABEZADO ───
-st.markdown("<h1 style='text-align:center; color:#E34E26; margin-bottom:0;'>ESTACIÓN METEOROLÓGICA LOS BRUJOS</h1>", unsafe_allow_html=True)
+st.markdown(f"<h1 style='text-align:center; color:{conf['color']}; margin-bottom:0;'>ESTACIÓN METEOROLÓGICA {fundo_sel.upper()}</h1>", unsafe_allow_html=True)
 if resumen:
     st.markdown(f"<p style='text-align:center; color:gray; margin-top:4px;'>Última actualización: {resumen['hora']}</p>", unsafe_allow_html=True)
 
@@ -107,17 +132,16 @@ if resumen:
 
 st.divider()
 
-# ─── CONTROLES (CORREGIDO PARA MULTISELECCIÓN) ───
+# ─── CONTROLES (MULTISELECCIÓN) ───
 col_title, col_btns = st.columns([1, 2])
 with col_title:
     st.subheader("📊 Comparativa Histórica (Últimos 30 días)")
 with col_btns:
-    # Cambiamos a st.multiselect para poder elegir varios años a la vez
     anios_disponibles = [2023, 2024, 2025, 2026]
     anios_seleccionados = st.multiselect(
         "Seleccione los años a comparar:",
         options=anios_disponibles,
-        default=anios_disponibles, # Por defecto muestra todos
+        default=anios_disponibles,
         placeholder="Seleccione años..."
     )
 
@@ -136,7 +160,6 @@ def ultimo_valor_2026(col_name, decimales=1, sufijo=""):
 
 def make_chart(col_name, ytitle, hover_suffix, height=340):
     fig = go.Figure()
-    # Usamos la variable de los años seleccionados en el multiselect
     for ano in anios_seleccionados:
         df_a = df_raw[df_raw['Año'] == ano].sort_values('Fecha_Visual')
         if df_a.empty: continue
@@ -155,7 +178,7 @@ def make_chart(col_name, ytitle, hover_suffix, height=340):
         ))
     fig.update_xaxes(showline=True, mirror=True, gridcolor="#F5F5F5", tickformat="%d-%b", tickangle=-45, dtick=86400000.0, range=[fecha_inicio, fecha_fin], tickfont=dict(weight="bold", size=10))
     fig.update_yaxes(showline=True, mirror=True, gridcolor="#F5F5F5", title_text=ytitle, tickfont=dict(weight="bold"))
-    fig.update_layout(height=height, plot_bgcolor="white", hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), hoverlabel=dict(bgcolor="#1a1a1a", font_size=13, font_color="white"), margin=dict(l=10, r=10, t=40, b=40))
+    fig.update_layout(height=height, plot_bgcolor="white", hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), hoverlabel=dict(bgcolor="#1a1a1a", font_size=13, font_color="white"), margin=dict(l=10, r=10, t=40, b=60))
     return fig
 
 # ─── ACORDEONES ───
@@ -173,7 +196,6 @@ for emoji, titulo, descripcion, col_name, ytitle, hover_suffix, expandido in ACO
     header    = f"{emoji} {titulo}{valor_hoy}"
     with st.expander(header, expanded=expandido):
         st.caption(descripcion)
-        # Solo dibujamos si hay años seleccionados
         if anios_seleccionados:
             st.plotly_chart(make_chart(col_name, ytitle, hover_suffix), use_container_width=True)
         else:
@@ -183,9 +205,13 @@ for emoji, titulo, descripcion, col_name, ytitle, hover_suffix, expandido in ACO
 st.divider()
 col_data, col_reload = st.columns([3, 1])
 with col_data:
-    with st.expander("📋 Ver tabla de datos históricos"):
+    with st.expander(f"📋 Ver tabla de datos históricos: {fundo_sel}"):
         st.dataframe(df_raw.sort_values("Fecha_Grafico", ascending=False), use_container_width=True)
 with col_reload:
     if st.button("🔄 Forzar recarga de datos", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
+
+if st.sidebar.button("🗑️ Limpiar Memoria"):
+    st.cache_data.clear()
+    st.rerun()
