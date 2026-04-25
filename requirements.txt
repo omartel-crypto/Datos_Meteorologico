@@ -1,3 +1,5 @@
+pytz
 pandas
 plotly
 requests
+streamlit
