@@ -107,20 +107,19 @@ if resumen:
 
 st.divider()
 
-# ─── CONTROLES ───
-if 'anios_visibles' not in st.session_state:
-    st.session_state.anios_visibles = [2023, 2024, 2025, 2026]
-
+# ─── CONTROLES: FILTRO MULTISELECCIÓN (MEJORADO) ───
 col_title, col_btns = st.columns([1, 2])
 with col_title:
-    st.subheader("📊 Comparativa Histórica (Últimos 30 días)")
+    st.subheader("📊 Comparativa Histórica")
 with col_btns:
-    opciones = ["Todos", "2023", "2024", "2025", "2026"]
-    seleccion = st.segmented_control("Años a comparar:", opciones, default="Todos")
-    if seleccion == "Todos":
-        st.session_state.anios_visibles = [2023, 2024, 2025, 2026]
-    elif seleccion:
-        st.session_state.anios_visibles = [int(seleccion)]
+    # Cambiamos botones por multiselect para permitir comparar varios años
+    anios_disponibles = [2023, 2024, 2025, 2026]
+    seleccion_anios = st.multiselect(
+        "Seleccione los años a comparar:",
+        options=anios_disponibles,
+        default=anios_disponibles, # Por defecto muestra todos
+        help="Puede seleccionar uno o varios años para comparar las gráficas"
+    )
 
 st.write("")
 
@@ -137,7 +136,8 @@ def ultimo_valor_2026(col_name, decimales=1, sufijo=""):
 
 def make_chart(col_name, ytitle, hover_suffix, height=340):
     fig = go.Figure()
-    for ano in st.session_state.anios_visibles:
+    # Usamos la selección del multiselect
+    for ano in seleccion_anios:
         df_a = df_raw[df_raw['Año'] == ano].sort_values('Fecha_Visual')
         if df_a.empty: continue
         label = f"Año {ano}"
@@ -145,12 +145,11 @@ def make_chart(col_name, ytitle, hover_suffix, height=340):
             x=df_a['Fecha_Visual'],
             y=df_a[col_name],
             name=label,
-            # line_shape='spline' hace que las líneas sean suaves/curvas
             line=dict(
                 color=estilos[ano],
                 width=5.5 if ano == 2026 else 2.5,
                 dash=dashes[ano],
-                shape='spline' 
+                shape='spline' # Líneas suaves
             ),
             hovertemplate=f"<b>{label}: %{{y}}{hover_suffix}</b><extra></extra>"
         ))
