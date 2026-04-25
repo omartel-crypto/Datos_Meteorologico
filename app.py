@@ -152,11 +152,18 @@ st.divider()
 st.subheader("🔍 Análisis Detallado por Horas (Zoom)")
 if conf.get("api_v2_capable"):
     col_z1, col_z2 = st.columns([1, 2])
-    with col_z1: fecha_analisis = st.date_input("Seleccione el día:", datetime.now())
+    with col_z1: 
+        fecha_analisis = st.date_input("Seleccione el día:", datetime.now().date())
     
     if st.button("📊 Generar Gráficos Detallados"):
         with st.spinner("Procesando datos horarios de Davis..."):
-            t_start = int(time.mktime(fecha_analisis.timetuple())); t_end = t_start + 86399; now_ts = int(time.time())
+            # OBTENEMOS HORA REAL DE PERÚ (SIN IMPORTAR EL SERVIDOR)
+            ahora_utc = datetime.utcnow()
+            ahora_peru = ahora_utc - timedelta(hours=5)
+            
+            t_start = int(time.mktime(fecha_analisis.timetuple()))
+            t_end = t_start + 86399
+            now_ts = int(time.time())
             p_hash = {"api-key": conf["api_key"], "t": str(now_ts), "station-id": str(conf["station_id"]), "start-timestamp": str(t_start), "end-timestamp": str(t_end)}
             msg = "".join([f"{k}{p_hash[k]}" for k in sorted(p_hash.keys())])
             sig = hmac.new(conf['api_secret'].encode('utf-8'), msg.encode('utf-8'), hashlib.sha256).hexdigest()
@@ -166,19 +173,12 @@ if conf.get("api_v2_capable"):
                 
                 target_sensor = next((s for s in data.get("sensors", []) if s.get("lsid") == conf["sensor_lsid"]), None)
                 
-                if not target_sensor:
-                    for s in data.get("sensors", []):
-                        if "data" in s and len(s["data"]) > 0:
-                            if "wind_speed_avg" in s["data"][0] or "temp_out" in s["data"][0] or "temp" in s["data"][0]:
-                                target_sensor = s
-                                break
-                
                 if target_sensor and "data" in target_sensor:
                     df_v2 = pd.DataFrame(target_sensor["data"])
                     df_v2['dt'] = pd.to_datetime(df_v2['ts'], unit='s') - timedelta(hours=5)
                     
-                    # --- FILTRO TIEMPO REAL: CORRECCIÓN PARA PERÚ ---
-                    ahora_peru = datetime.utcnow() - timedelta(hours=5)
+                    # --- FILTRO CRÍTICO ---
+                    # Si es hoy, eliminamos todo registro cuya hora sea mayor a la de este momento en Perú
                     if fecha_analisis == ahora_peru.date():
                         df_v2 = df_v2[df_v2['dt'] <= ahora_peru]
 
@@ -201,6 +201,7 @@ if conf.get("api_v2_capable"):
                     df_h['v_max'] = round(df_h['wind_speed_hi'] * 1.609, 1)
                     df_h['hum_v'] = round(df_h[h_col], 1)
 
+                    # 1. Gráfico Térmico
                     fig_t = go.Figure()
                     fig_t.add_trace(go.Scatter(x=df_h['H'], y=df_h['max_c'], name="T° Máxima", line=dict(color="#FF0000", width=2), mode='lines+markers+text', text=df_h['max_c'], textposition="top center", textfont=dict(color="red"), hovertemplate="Máx: %{y}°C<extra></extra>"))
                     fig_t.add_trace(go.Scatter(x=df_h['H'], y=df_h['min_c'], name="T° Mínima", line=dict(color="#0070C0", width=2), mode='lines+markers+text', text=df_h['min_c'], textposition="bottom center", textfont=dict(color="#0070C0"), hovertemplate="Mín: %{y}°C<extra></extra>"))
@@ -209,6 +210,7 @@ if conf.get("api_v2_capable"):
                     fig_t.update_xaxes(showline=True, mirror=True, gridcolor="#F5F5F5"); fig_t.update_yaxes(showline=True, mirror=True, gridcolor="#F5F5F5")
                     st.plotly_chart(fig_t, use_container_width=True)
 
+                    # 2. Gráfico Viento y Humedad
                     fig_v = go.Figure()
                     fig_v.add_trace(go.Scatter(x=df_h['H'], y=df_h['hum_v'], name="% Humedad", line=dict(color="#33CCFF", width=2), mode='lines+markers+text', text=df_h['hum_v'].astype(str) + '%', textposition="top center", textfont=dict(color="#006699"), hovertemplate="Hum: %{y}%<extra></extra>"))
                     fig_v.add_trace(go.Scatter(x=df_h['H'], y=df_h['v_max'], name="Max Viento", line=dict(color="#FFCC00", width=2), mode='lines+markers+text', text=df_h['v_max'], textposition="top center", textfont=dict(color="#996600"), hovertemplate="V. Máx: %{y} km/h<extra></extra>"))
@@ -217,7 +219,7 @@ if conf.get("api_v2_capable"):
                     fig_v.update_xaxes(showline=True, mirror=True, gridcolor="#F5F5F5"); fig_v.update_yaxes(showline=True, mirror=True, gridcolor="#F5F5F5")
                     st.plotly_chart(fig_v, use_container_width=True)
                     
-                else: st.error("No se encontraron sensores con datos para este día.")
+                else: st.error("No se encontraron sensores con datos.")
             except Exception as e: st.error(f"Error de conexión: {e}")
 else: st.warning("API v2 no configurada.")
 
