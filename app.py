@@ -7,24 +7,24 @@ import requests
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(layout="wide", page_title="Dashboard Meteorológico", page_icon="🌡️")
 
-# --- CONFIGURACIÓN DE FUNDOS ---
+# --- CONFIGURACIÓN DE FUNDOS (Yaurilla primero por defecto) ---
 CONFIG_FUNDOS = {
-    "Los Brujos": {
-        "user_v1": "001D0A808AB7",
-        "csv_file": "datos_actualizados.csv",
-        "color": "#E34E26"
-    },
     "Yaurilla": {
         "user_v1": "001D0A80A25D",
         "csv_file": "datos_yaurilla.csv",
         "color": "#1E88E5"
+    },
+    "Los Brujos": {
+        "user_v1": "001D0A808AB7",
+        "csv_file": "datos_actualizados.csv",
+        "color": "#E34E26"
     }
 }
 
 # ─── SIDEBAR: SELECCIÓN DE FUNDO ───
 st.sidebar.title("Configuración")
 
-# AGREGADO: Carga del logo local desde tu carpeta
+# Carga del logo local desde tu carpeta
 st.sidebar.image("logo_fundo.png", use_container_width=True)
 
 fundo_sel = st.sidebar.selectbox("📍 Seleccione el Fundo:", list(CONFIG_FUNDOS.keys()))
@@ -181,9 +181,9 @@ def make_chart(col_name, ytitle, hover_suffix, height=340):
     fig.update_layout(height=height, plot_bgcolor="white", hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), hoverlabel=dict(bgcolor="#1a1a1a", font_size=13, font_color="white"), margin=dict(l=10, r=10, t=40, b=60))
     return fig
 
-# ─── ACORDEONES ───
+# ─── ACORDEONES (Cerrados por defecto para limpieza visual) ───
 ACORDEONES = [
-    ("🌡️", "Temperatura Máxima Diaria", "Pico de calor alcanzado durante el día...", "Max_Dia", "°C", "°C", True),
+    ("🌡️", "Temperatura Máxima Diaria", "Pico de calor alcanzado durante el día...", "Max_Dia", "°C", "°C", False),
     ("🌡️", "Temperatura Mínima Diaria", "Temperatura nocturna más baja...", "Min_Dia", "°C", "°C", False),
     ("💧", "Humedad Máxima Diaria", "Pico de humedad relativa del día...", "Max_Hum", "%", "%", False),
     ("💧", "Humedad Mínima Diaria", "Mínima humedad registrada...", "Min_Hum", "%", "%", False),
