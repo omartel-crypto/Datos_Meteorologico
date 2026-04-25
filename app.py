@@ -152,11 +152,16 @@ st.divider()
 st.subheader("🔍 Análisis Detallado por Horas (Zoom)")
 if conf.get("api_v2_capable"):
     col_z1, col_z2 = st.columns([1, 2])
-    with col_z1: fecha_analisis = st.date_input("Seleccione el día:", datetime.now())
+    with col_z1: fecha_analisis = st.date_input("Seleccione el día:", datetime.utcnow().date() - timedelta(hours=5))
     
     if st.button("📊 Generar Gráficos Detallados"):
         with st.spinner("Procesando datos horarios de Davis..."):
-            t_start = int(time.mktime(fecha_analisis.timetuple())); t_end = t_start + 86399; now_ts = int(time.time())
+            # OBTENEMOS HORA REAL DE PERÚ CALCULADA DESDE UTC PARA LA NUBE
+            ahora_peru = datetime.utcnow() - timedelta(hours=5)
+            
+            t_start = int(time.mktime(fecha_analisis.timetuple()))
+            t_end = t_start + 86399
+            now_ts = int(time.time())
             p_hash = {"api-key": conf["api_key"], "t": str(now_ts), "station-id": str(conf["station_id"]), "start-timestamp": str(t_start), "end-timestamp": str(t_end)}
             msg = "".join([f"{k}{p_hash[k]}" for k in sorted(p_hash.keys())])
             sig = hmac.new(conf['api_secret'].encode('utf-8'), msg.encode('utf-8'), hashlib.sha256).hexdigest()
@@ -175,11 +180,11 @@ if conf.get("api_v2_capable"):
                 
                 if target_sensor and "data" in target_sensor:
                     df_v2 = pd.DataFrame(target_sensor["data"])
-                    
-                    # --- FILTRO HORA PERÚ (UTC-5) ---
+                    # Convertir marcas de tiempo a hora de Perú (UTC-5)
                     df_v2['dt'] = pd.to_datetime(df_v2['ts'], unit='s') - timedelta(hours=5)
-                    ahora_peru = datetime.utcnow() - timedelta(hours=5)
                     
+                    # --- FILTRO DE TIEMPO REAL DINÁMICO ---
+                    # Si el día consultado es hoy (Perú), borramos lo que sea mayor al momento actual real
                     if fecha_analisis == ahora_peru.date():
                         df_v2 = df_v2[df_v2['dt'] <= ahora_peru]
 
