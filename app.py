@@ -152,7 +152,7 @@ st.divider()
 st.subheader("🔍 Análisis Detallado por Horas (Zoom)")
 if conf.get("api_v2_capable"):
     col_z1, col_z2 = st.columns([1, 2])
-    with col_z1: fecha_analisis = st.date_input("Seleccione el día:", datetime.now() - timedelta(days=1))
+    with col_z1: fecha_analisis = st.date_input("Seleccione el día:", datetime.now())
     
     if st.button("📊 Generar Gráficos Detallados"):
         with st.spinner("Procesando datos horarios de Davis..."):
@@ -164,12 +164,10 @@ if conf.get("api_v2_capable"):
                 r = requests.get(f"https://api.weatherlink.com/v2/historic/{conf['station_id']}", params={"api-key": conf["api_key"], "t": now_ts, "start-timestamp": t_start, "end-timestamp": t_end, "api-signature": sig}, timeout=15)
                 data = r.json()
                 
-                # BUSCADOR MEJORADO DE SENSOR
-                sensor_data = None
-                # Intento 1: Buscar por el sensor_lsid configurado
+                # BUSCADOR MEJORADO DE SENSOR (Como estaba antes)
                 target_sensor = next((s for s in data.get("sensors", []) if s.get("lsid") == conf["sensor_lsid"]), None)
                 
-                # Intento 2: Si no aparece, buscar cualquier sensor que tenga datos de viento o humedad
+                # Si no aparece el LSID, buscamos cualquier sensor con datos (Para Brujos)
                 if not target_sensor:
                     for s in data.get("sensors", []):
                         if "data" in s and len(s["data"]) > 0:
@@ -180,9 +178,16 @@ if conf.get("api_v2_capable"):
                 if target_sensor and "data" in target_sensor:
                     df_v2 = pd.DataFrame(target_sensor["data"])
                     df_v2['dt'] = pd.to_datetime(df_v2['ts'], unit='s') - timedelta(hours=5)
+                    
+                    # --- CORRECCIÓN DE TIEMPO REAL ---
+                    # Si es el día de HOY, cortamos los datos en la hora actual de Perú
+                    if fecha_analisis == datetime.now().date():
+                        ahora_peru = datetime.now()
+                        df_v2 = df_v2[df_v2['dt'] <= ahora_peru]
+
                     df_v2['H'] = df_v2['dt'].dt.strftime('%H:00')
                     
-                    # Identificar columnas (Brujos usa temp/hi/lo, Yaurilla usa temp_out/hi/lo)
+                    # Identificar columnas
                     hi_t = 'temp_hi' if 'temp_hi' in df_v2.columns else 'temp_out_hi'
                     lo_t = 'temp_lo' if 'temp_lo' in df_v2.columns else 'temp_out_lo'
                     av_t = 'temp' if 'temp' in df_v2.columns else 'temp_out'
@@ -207,6 +212,7 @@ if conf.get("api_v2_capable"):
                     fig_t.add_trace(go.Scatter(x=df_h['H'], y=df_h['min_c'], name="T° Mínima", line=dict(color="#0070C0", width=2), mode='lines+markers+text', text=df_h['min_c'], textposition="bottom center", textfont=dict(color="#0070C0"), hovertemplate="Mín: %{y}°C<extra></extra>"))
                     fig_t.add_trace(go.Scatter(x=df_h['H'], y=df_h['avg_c'], name="T° Promedio", line=dict(color="#FF9900", width=4), mode='lines+markers+text', text=df_h['avg_c'], textposition="top center", textfont=dict(color="black", size=12), hovertemplate="Prom: %{y}°C<extra></extra>"))
                     fig_t.update_layout(title=f"Curva Térmica Horaria: {fundo_sel} ({fecha_analisis})", xaxis_title="Hora", yaxis_title="°C", plot_bgcolor="white", height=500, hovermode="x unified", hoverlabel=dict(bgcolor="#1a1a1a", font_size=13, font_color="white"), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                    fig_t.update_xaxes(showline=True, mirror=True, gridcolor="#F5F5F5"); fig_t.update_yaxes(showline=True, mirror=True, gridcolor="#F5F5F5")
                     st.plotly_chart(fig_t, use_container_width=True)
 
                     # 2. Gráfico Viento y Humedad
@@ -215,9 +221,10 @@ if conf.get("api_v2_capable"):
                     fig_v.add_trace(go.Scatter(x=df_h['H'], y=df_h['v_max'], name="Max Viento", line=dict(color="#FFCC00", width=2), mode='lines+markers+text', text=df_h['v_max'], textposition="top center", textfont=dict(color="#996600"), hovertemplate="V. Máx: %{y} km/h<extra></extra>"))
                     fig_v.add_trace(go.Scatter(x=df_h['H'], y=df_h['v_avg'], name="Prom Viento", line=dict(color="#70AD47", width=3), mode='lines+markers+text', text=df_h['v_avg'], textposition="bottom center", textfont=dict(color="#385723"), hovertemplate="V. Prom: %{y} km/h<extra></extra>"))
                     fig_v.update_layout(title=f"Viento y Humedad Horaria: {fundo_sel} ({fecha_analisis})", xaxis_title="Hora", plot_bgcolor="white", height=500, hovermode="x unified", hoverlabel=dict(bgcolor="#1a1a1a", font_size=13, font_color="white"), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                    fig_v.update_xaxes(showline=True, mirror=True, gridcolor="#F5F5F5"); fig_v.update_yaxes(showline=True, mirror=True, gridcolor="#F5F5F5")
                     st.plotly_chart(fig_v, use_container_width=True)
                     
-                else: st.error("No se encontraron sensores con datos válidos para este día en Los Brujos.")
+                else: st.error("No se encontraron sensores con datos para este día.")
             except Exception as e: st.error(f"Error de conexión: {e}")
 else: st.warning("API v2 no configurada.")
 
