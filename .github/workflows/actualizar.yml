@@ -1,7 +1,10 @@
 name: Actualizacion Automatica Diaria
 on:
   schedule:
-    - cron: '0 8 * * *' # Esto es 6:00 AM hora Perú
+    # Intento 1: 3:00 AM Perú (8:00 AM UTC) - Para tener margen de sobra
+    - cron: '0 8 * * *'
+    # Intento 2: 4:30 AM Perú (9:30 AM UTC) - Por si el primero se retrasa
+    - cron: '30 9 * * *'
   workflow_dispatch:
 
 jobs:
@@ -19,13 +22,17 @@ jobs:
       - name: Instalar librerias
         run: pip install pandas requests
 
-      - name: Ejecutar script de carga
+      - name: Ejecutar script Los Brujos
         run: python actualizar_datos.py
 
-      - name: Guardar cambios en el CSV
+      - name: Ejecutar script Yaurilla
+        run: python actualizar_yaurilla.py
+
+      - name: Guardar cambios en ambos CSV
         run: |
-          git config --global user.name 'Bot de Los Brujos'
-          git config --global user.email 'bot@brujos.com'
-          git add datos_actualizados.csv
-          git commit -m "Data actualizada automaticamente por el Robot" || exit 0
+          git config --global user.name 'Robot Meteorologico'
+          git config --global user.email 'bot@fundo.com'
+          # Agregamos los dos archivos CSV
+          git add datos_actualizados.csv datos_yaurilla.csv
+          git commit -m "Robot: Data actualizada (Brujos y Yaurilla)" || exit 0
           git push
