@@ -36,7 +36,7 @@ def obtener_datos_v1():
         max_h = obs.get("relative_humidity_day_high", resumen["hum_act"])
         min_h = obs.get("relative_humidity_day_low",  resumen["hum_act"])
 
-        # CAPTURA DE HORAS DE RÉCORDS (NUEVO)
+        # CAPTURA DE HORAS DE RÉCORDS
         horas_records = {
             "Max_Dia": obs.get("temp_day_high_time"),
             "Min_Dia": obs.get("temp_day_low_time"),
@@ -57,7 +57,6 @@ def obtener_datos_v1():
     except:
         return None, None, {}
 
-
 @st.cache_data(ttl=300)
 def cargar_todo():
     try:
@@ -76,7 +75,6 @@ def cargar_todo():
     except:
         return pd.DataFrame(), None, {}
 
-
 df_raw, resumen, horas_records = cargar_todo()
 
 # ─── ESTILOS GLOBALES ───
@@ -86,17 +84,9 @@ fecha_fin    = datetime.now()
 fecha_inicio = fecha_fin - timedelta(days=31)
 
 # ─── ENCABEZADO ───
-st.markdown(
-    "<h1 style='text-align:center; color:#E34E26; margin-bottom:0;'>"
-    "ESTACIÓN METEOROLÓGICA LOS BRUJOS</h1>",
-    unsafe_allow_html=True
-)
+st.markdown("<h1 style='text-align:center; color:#E34E26; margin-bottom:0;'>ESTACIÓN METEOROLÓGICA LOS BRUJOS</h1>", unsafe_allow_html=True)
 if resumen:
-    st.markdown(
-        f"<p style='text-align:center; color:gray; margin-top:4px;'>"
-        f"Última actualización: {resumen['hora']}</p>",
-        unsafe_allow_html=True
-    )
+    st.markdown(f"<p style='text-align:center; color:gray; margin-top:4px;'>Última actualización: {resumen['hora']}</p>", unsafe_allow_html=True)
 
 # ─── MÉTRICAS EN TIEMPO REAL ───
 if resumen:
@@ -110,15 +100,14 @@ if resumen:
         m5, m6, m7, m8 = st.columns(4)
         m5.metric("🌧️ Lluvia Hoy",        f"{resumen['lluvia_hoy']} mm")
         m6.metric("🌱 Evapotranspiración", f"{resumen['et_hoy']} mm")
-        m7.metric("💨 Viento",             f"{resumen['viento']} mph",
-                  f"Dir: {resumen['dir_viento']}")
+        m7.metric("💨 Viento",             f"{resumen['viento']} mph", f"Dir: {resumen['dir_viento']}")
         if m8.button("🔄 Actualizar Ahora", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
 st.divider()
 
-# ─── CONTROLES: SELECTOR DE AÑOS ───
+# ─── CONTROLES ───
 if 'anios_visibles' not in st.session_state:
     st.session_state.anios_visibles = [2023, 2024, 2025, 2026]
 
@@ -127,134 +116,72 @@ with col_title:
     st.subheader("📊 Comparativa Histórica (Últimos 30 días)")
 with col_btns:
     opciones = ["Todos", "2023", "2024", "2025", "2026"]
-    seleccion = st.segmented_control(
-        "Años a comparar:", opciones, default="Todos"
-    )
+    seleccion = st.segmented_control("Años a comparar:", opciones, default="Todos")
     if seleccion == "Todos":
         st.session_state.anios_visibles = [2023, 2024, 2025, 2026]
     elif seleccion:
         st.session_state.anios_visibles = [int(seleccion)]
 
-st.write("")  # espaciado
+st.write("")
 
-# ─── HELPERS ───────────────────────────────────────────────────────────────
-
+# ─── HELPERS ───
 def ultimo_valor_2026(col_name, decimales=1, sufijo=""):
-    """Devuelve el último dato de 2026 con su hora de registro para el header."""
     try:
         df26 = df_raw[df_raw['Año'] == 2026].sort_values('Fecha_Visual')
         val  = df26[col_name].dropna().iloc[-1]
-        
-        # Obtener hora si está disponible en horas_records
         hora = horas_records.get(col_name)
         hora_str = f" a las **{hora}**" if hora else ""
-        
         return f"  —  Hoy: **{round(val, decimales)}{sufijo}**{hora_str}"
     except:
         return ""
 
-
 def make_chart(col_name, ytitle, hover_suffix, height=340):
-    """Crea un gráfico Plotly de una sola variable para todos los años visibles."""
     fig = go.Figure()
     for ano in st.session_state.anios_visibles:
         df_a = df_raw[df_raw['Año'] == ano].sort_values('Fecha_Visual')
-        if df_a.empty:
-            continue
+        if df_a.empty: continue
         label = f"Año {ano}"
         fig.add_trace(go.Scatter(
             x=df_a['Fecha_Visual'],
             y=df_a[col_name],
             name=label,
+            # line_shape='spline' hace que las líneas sean suaves/curvas
             line=dict(
                 color=estilos[ano],
                 width=5.5 if ano == 2026 else 2.5,
-                dash=dashes[ano]
+                dash=dashes[ano],
+                shape='spline' 
             ),
             hovertemplate=f"<b>{label}: %{{y}}{hover_suffix}</b><extra></extra>"
         ))
-    fig.update_xaxes(
-        showline=True, mirror=True, gridcolor="#F5F5F5",
-        tickformat="%d-%b", tickangle=-45, dtick=86400000.0,
-        range=[fecha_inicio, fecha_fin],
-        tickfont=dict(weight="bold", size=10)
-    )
-    fig.update_yaxes(
-        showline=True, mirror=True, gridcolor="#F5F5F5",
-        title_text=ytitle, tickfont=dict(weight="bold")
-    )
-    fig.update_layout(
-        height=height,
-        plot_bgcolor="white",
-        hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                    xanchor="right", x=1),
-        hoverlabel=dict(bgcolor="#1a1a1a", font_size=13, font_color="white"),
-        margin=dict(l=10, r=10, t=40, b=40)
-    )
+    fig.update_xaxes(showline=True, mirror=True, gridcolor="#F5F5F5", tickformat="%d-%b", tickangle=-45, dtick=86400000.0, range=[fecha_inicio, fecha_fin], tickfont=dict(weight="bold", size=10))
+    fig.update_yaxes(showline=True, mirror=True, gridcolor="#F5F5F5", title_text=ytitle, tickfont=dict(weight="bold"))
+    fig.update_layout(height=height, plot_bgcolor="white", hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), hoverlabel=dict(bgcolor="#1a1a1a", font_size=13, font_color="white"), margin=dict(l=10, r=10, t=40, b=40))
     return fig
 
-
-# ─── ACORDEONES ────────────────────────────────────────────────────────────
+# ─── ACORDEONES ───
 ACORDEONES = [
-    (
-        "🌡️", "Temperatura Máxima Diaria",
-        "Pico de calor alcanzado durante el día. Valores altos prolongados incrementan "
-        "el estrés hídrico y aceleran la maduración del cultivo.",
-        "Max_Dia", "°C", "°C", True
-    ),
-    (
-        "🌡️", "Temperatura Mínima Diaria",
-        "Temperatura nocturna más baja registrada. Clave para el cálculo de Grados Día "
-        "y para evaluar el riesgo de daño por frío en etapas sensibles.",
-        "Min_Dia", "°C", "°C", False
-    ),
-    (
-        "💧", "Humedad Máxima Diaria",
-        "Pico de humedad relativa del día. Valores superiores al 90% sostenidos "
-        "favorecen el desarrollo de enfermedades fúngicas (Botrytis, mildiu).",
-        "Max_Hum", "%", "%", False
-    ),
-    (
-        "💧", "Humedad Mínima Diaria",
-        "Mínima humedad registrada. Indica el momento de mayor déficit de presión "
-        "de vapor (DPV), relacionado con la apertura estomática y la demanda hídrica.",
-        "Min_Hum", "%", "%", False
-    ),
-    (
-        "🌿", "Evapotranspiración Diaria (ET)",
-        "Agua perdida del suelo por evaporación y desde la planta por transpiración. "
-        "Valor de referencia directo para programar la lámina de riego diaria.",
-        "ET_Dia", "mm", " mm", False
-    ),
-    (
-        "📈", "Grados Día Calor (GDC)",
-        "Unidades térmicas acumuladas por encima de la base de 10 °C. "
-        "Indicador del avance fenológico: permite proyectar floración, cuaje y cosecha.",
-        "GD_Dia", "GDC", " GD", False
-    ),
+    ("🌡️", "Temperatura Máxima Diaria", "Pico de calor alcanzado durante el día...", "Max_Dia", "°C", "°C", True),
+    ("🌡️", "Temperatura Mínima Diaria", "Temperatura nocturna más baja...", "Min_Dia", "°C", "°C", False),
+    ("💧", "Humedad Máxima Diaria", "Pico de humedad relativa del día...", "Max_Hum", "%", "%", False),
+    ("💧", "Humedad Mínima Diaria", "Mínima humedad registrada...", "Min_Hum", "%", "%", False),
+    ("🌿", "Evapotranspiración Diaria (ET)", "Agua perdida del suelo...", "ET_Dia", "mm", " mm", False),
+    ("📈", "Grados Día Calor (GDC)", "Unidades térmicas acumuladas...", "GD_Dia", "GDC", " GD", False),
 ]
 
 for emoji, titulo, descripcion, col_name, ytitle, hover_suffix, expandido in ACORDEONES:
     valor_hoy = ultimo_valor_2026(col_name, sufijo=ytitle)
     header    = f"{emoji} {titulo}{valor_hoy}"
-
     with st.expander(header, expanded=expandido):
         st.caption(descripcion)
-        st.plotly_chart(
-            make_chart(col_name, ytitle, hover_suffix),
-            use_container_width=True
-        )
+        st.plotly_chart(make_chart(col_name, ytitle, hover_suffix), use_container_width=True)
 
 # ─── PIE DE PÁGINA ───
 st.divider()
 col_data, col_reload = st.columns([3, 1])
 with col_data:
     with st.expander("📋 Ver tabla de datos históricos"):
-        st.dataframe(
-            df_raw.sort_values("Fecha_Grafico", ascending=False),
-            use_container_width=True
-        )
+        st.dataframe(df_raw.sort_values("Fecha_Grafico", ascending=False), use_container_width=True)
 with col_reload:
     if st.button("🔄 Forzar recarga de datos", use_container_width=True):
         st.cache_data.clear()
