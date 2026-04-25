@@ -107,18 +107,18 @@ if resumen:
 
 st.divider()
 
-# ─── CONTROLES: FILTRO MULTISELECCIÓN (MEJORADO) ───
+# ─── CONTROLES (CORREGIDO PARA MULTISELECCIÓN) ───
 col_title, col_btns = st.columns([1, 2])
 with col_title:
-    st.subheader("📊 Comparativa Histórica")
+    st.subheader("📊 Comparativa Histórica (Últimos 30 días)")
 with col_btns:
-    # Cambiamos botones por multiselect para permitir comparar varios años
+    # Cambiamos a st.multiselect para poder elegir varios años a la vez
     anios_disponibles = [2023, 2024, 2025, 2026]
-    seleccion_anios = st.multiselect(
+    anios_seleccionados = st.multiselect(
         "Seleccione los años a comparar:",
         options=anios_disponibles,
         default=anios_disponibles, # Por defecto muestra todos
-        help="Puede seleccionar uno o varios años para comparar las gráficas"
+        placeholder="Seleccione años..."
     )
 
 st.write("")
@@ -136,8 +136,8 @@ def ultimo_valor_2026(col_name, decimales=1, sufijo=""):
 
 def make_chart(col_name, ytitle, hover_suffix, height=340):
     fig = go.Figure()
-    # Usamos la selección del multiselect
-    for ano in seleccion_anios:
+    # Usamos la variable de los años seleccionados en el multiselect
+    for ano in anios_seleccionados:
         df_a = df_raw[df_raw['Año'] == ano].sort_values('Fecha_Visual')
         if df_a.empty: continue
         label = f"Año {ano}"
@@ -149,7 +149,7 @@ def make_chart(col_name, ytitle, hover_suffix, height=340):
                 color=estilos[ano],
                 width=5.5 if ano == 2026 else 2.5,
                 dash=dashes[ano],
-                shape='spline' # Líneas suaves
+                shape='spline' 
             ),
             hovertemplate=f"<b>{label}: %{{y}}{hover_suffix}</b><extra></extra>"
         ))
@@ -173,7 +173,11 @@ for emoji, titulo, descripcion, col_name, ytitle, hover_suffix, expandido in ACO
     header    = f"{emoji} {titulo}{valor_hoy}"
     with st.expander(header, expanded=expandido):
         st.caption(descripcion)
-        st.plotly_chart(make_chart(col_name, ytitle, hover_suffix), use_container_width=True)
+        # Solo dibujamos si hay años seleccionados
+        if anios_seleccionados:
+            st.plotly_chart(make_chart(col_name, ytitle, hover_suffix), use_container_width=True)
+        else:
+            st.warning("Seleccione al menos un año arriba para visualizar la comparativa.")
 
 # ─── PIE DE PÁGINA ───
 st.divider()
