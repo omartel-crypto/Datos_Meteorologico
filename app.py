@@ -76,7 +76,7 @@ def obtener_datos_v1():
         return resumen, df_hoy, horas_records
     except: return None, None, {}
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def cargar_todo(fundo):
     try:
         df = pd.read_csv(CONFIG_FUNDOS[fundo]["csv_file"], encoding="utf-8-sig")
@@ -164,10 +164,8 @@ if conf.get("api_v2_capable"):
                 r = requests.get(f"https://api.weatherlink.com/v2/historic/{conf['station_id']}", params={"api-key": conf["api_key"], "t": now_ts, "start-timestamp": t_start, "end-timestamp": t_end, "api-signature": sig}, timeout=15)
                 data = r.json()
                 
-                # BUSCADOR MEJORADO DE SENSOR (Como estaba antes)
                 target_sensor = next((s for s in data.get("sensors", []) if s.get("lsid") == conf["sensor_lsid"]), None)
                 
-                # Si no aparece el LSID, buscamos cualquier sensor con datos (Para Brujos)
                 if not target_sensor:
                     for s in data.get("sensors", []):
                         if "data" in s and len(s["data"]) > 0:
@@ -179,21 +177,18 @@ if conf.get("api_v2_capable"):
                     df_v2 = pd.DataFrame(target_sensor["data"])
                     df_v2['dt'] = pd.to_datetime(df_v2['ts'], unit='s') - timedelta(hours=5)
                     
-                    # --- CORRECCIÓN DE TIEMPO REAL ---
-                    # Si es el día de HOY, cortamos los datos en la hora actual de Perú
-                    if fecha_analisis == datetime.now().date():
-                        ahora_peru = datetime.now()
+                    # --- FILTRO TIEMPO REAL: CORRECCIÓN PARA PERÚ ---
+                    ahora_peru = datetime.utcnow() - timedelta(hours=5)
+                    if fecha_analisis == ahora_peru.date():
                         df_v2 = df_v2[df_v2['dt'] <= ahora_peru]
 
                     df_v2['H'] = df_v2['dt'].dt.strftime('%H:00')
                     
-                    # Identificar columnas
                     hi_t = 'temp_hi' if 'temp_hi' in df_v2.columns else 'temp_out_hi'
                     lo_t = 'temp_lo' if 'temp_lo' in df_v2.columns else 'temp_out_lo'
                     av_t = 'temp' if 'temp' in df_v2.columns else 'temp_out'
                     h_col = 'hum' if 'hum' in df_v2.columns else 'hum_out'
 
-                    # Agrupar por hora
                     df_h = df_v2.groupby('H').agg({
                         hi_t:'max', lo_t:'min', av_t:'mean',
                         'wind_speed_avg':'mean', 'wind_speed_hi':'max', h_col:'mean'
@@ -206,7 +201,6 @@ if conf.get("api_v2_capable"):
                     df_h['v_max'] = round(df_h['wind_speed_hi'] * 1.609, 1)
                     df_h['hum_v'] = round(df_h[h_col], 1)
 
-                    # 1. Gráfico Térmico
                     fig_t = go.Figure()
                     fig_t.add_trace(go.Scatter(x=df_h['H'], y=df_h['max_c'], name="T° Máxima", line=dict(color="#FF0000", width=2), mode='lines+markers+text', text=df_h['max_c'], textposition="top center", textfont=dict(color="red"), hovertemplate="Máx: %{y}°C<extra></extra>"))
                     fig_t.add_trace(go.Scatter(x=df_h['H'], y=df_h['min_c'], name="T° Mínima", line=dict(color="#0070C0", width=2), mode='lines+markers+text', text=df_h['min_c'], textposition="bottom center", textfont=dict(color="#0070C0"), hovertemplate="Mín: %{y}°C<extra></extra>"))
@@ -215,7 +209,6 @@ if conf.get("api_v2_capable"):
                     fig_t.update_xaxes(showline=True, mirror=True, gridcolor="#F5F5F5"); fig_t.update_yaxes(showline=True, mirror=True, gridcolor="#F5F5F5")
                     st.plotly_chart(fig_t, use_container_width=True)
 
-                    # 2. Gráfico Viento y Humedad
                     fig_v = go.Figure()
                     fig_v.add_trace(go.Scatter(x=df_h['H'], y=df_h['hum_v'], name="% Humedad", line=dict(color="#33CCFF", width=2), mode='lines+markers+text', text=df_h['hum_v'].astype(str) + '%', textposition="top center", textfont=dict(color="#006699"), hovertemplate="Hum: %{y}%<extra></extra>"))
                     fig_v.add_trace(go.Scatter(x=df_h['H'], y=df_h['v_max'], name="Max Viento", line=dict(color="#FFCC00", width=2), mode='lines+markers+text', text=df_h['v_max'], textposition="top center", textfont=dict(color="#996600"), hovertemplate="V. Máx: %{y} km/h<extra></extra>"))
