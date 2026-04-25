@@ -1,7 +1,7 @@
 name: Actualizacion Automatica Diaria
 on:
   schedule:
-    - cron: '0 10 * * *' # Esto es 6:00 AM hora Perú
+    - cron: '0 8 * * *' # Esto es 6:00 AM hora Perú
   workflow_dispatch:
 
 jobs:
