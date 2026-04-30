@@ -225,8 +225,13 @@ if conf.get("api_v2_capable"):
             hoy_p    = hoy_peru()
 
             # timestamps para la API (el servidor Davis trabaja en UTC)
-            t_start  = int(time.mktime(fecha_analisis.timetuple()))
-            t_end    = t_start + 86399
+            # ✅ Convertir fecha a timestamp usando UTC-5 (Lima), no la TZ del servidor
+            from datetime import timezone
+            lima_offset = timezone(timedelta(hours=-5))
+            t_start = int(datetime.combine(fecha_analisis, datetime.min.time())
+              .replace(tzinfo=lima_offset)
+              .timestamp())
+            t_end = t_start + 86399
             now_ts   = int(time.time())
 
             p_hash = {
