@@ -86,17 +86,27 @@ def obtener_datos_v1():
 def cargar_todo(fundo):
     try:
         df = pd.read_csv(CONFIG_FUNDOS[fundo]["csv_file"], encoding="utf-8-sig")
-        if 'Anio' in df.columns:
-            df = df.rename(columns={'Anio': 'Año'})
-        df['Fecha_Grafico'] = pd.to_datetime(df['Fecha_Grafico'], dayfirst=True)
+        df.columns = df.columns.str.strip()
+        
+        if 'Anio' in df.columns: df = df.rename(columns={'Anio': 'Año'})
+        
+        iso = pd.to_datetime(df['Fecha_Grafico'], format='%Y-%m-%d', errors='coerce')
+        lat = pd.to_datetime(df['Fecha_Grafico'], format='%d/%m/%Y', errors='coerce')
+        df['Fecha_Grafico'] = iso.fillna(lat)
+        
+        df = df.dropna(subset=['Fecha_Grafico'])
         df['Fecha_Visual']  = df['Fecha_Grafico'].apply(lambda x: x.replace(year=2026))
+        
         resumen, df_hoy, horas_records = obtener_datos_v1()
         df = df[~(df['Fecha_Grafico'].dt.date == hoy_peru())]
         if df_hoy is not None:
+            if 'Anio' in df_hoy.columns: df_hoy = df_hoy.rename(columns={'Anio': 'Año'})
             df = pd.concat([df, df_hoy], ignore_index=True)
+            
         return df, resumen, horas_records
     except:
         return pd.DataFrame(), None, {}
+
 df_raw, resumen, horas_records = cargar_todo(fundo_sel)
 # ─── ESTILOS ───
 estilos = {2023: "#fdb913", 2024: "#8cc63f", 2025: "#00a19a", 2026: conf["color"]}
