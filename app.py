@@ -1,4 +1,5 @@
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
@@ -8,6 +9,9 @@ import hashlib
 import hmac
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(layout="wide", page_title="Dashboard Meteorológico", page_icon="🌡️")
+# Configurar el refresco automático cada 5 minutos (300,000 milisegundos)
+st_autorefresh(interval=300000, key="datarefresh")
+st.sidebar.caption(f"Última actualización: {datetime.now().strftime('%H:%M:%S')}")
 # --- CONFIGURACIÓN DE FUNDOS ---
 CONFIG_FUNDOS = {
     "Yaurilla": {
