@@ -11,7 +11,6 @@ import hmac
 st.set_page_config(layout="wide", page_title="Dashboard Meteorológico", page_icon="🌡️")
 # Configurar el refresco automático cada 5 minutos (300,000 milisegundos)
 st_autorefresh(interval=300000, key="datarefresh")
-st.sidebar.caption(f"Última actualización: {datetime.now().strftime('%H:%M:%S')}")
 # --- CONFIGURACIÓN DE FUNDOS ---
 CONFIG_FUNDOS = {
     "Yaurilla": {
@@ -64,6 +63,7 @@ def ahora_peru():
 def hoy_peru():
     """Fecha de hoy en Perú."""
     return ahora_peru().date()
+st.sidebar.caption(f"Última actualización (Ica): {ahora_peru().strftime('%H:%M:%S')}")
 # ─── SIDEBAR ───
 st.sidebar.title("Configuración")
 st.sidebar.image("logo_fundo.png", use_container_width=True)
