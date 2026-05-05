@@ -2,11 +2,8 @@ name: Actualizacion Automatica Diaria
  
 on:
   schedule:
-    # Intento 1: 4:00 AM Lima = 9:00 AM UTC  ← Menos congestionado que 8 UTC
-    - cron: '0 9 * * *'
-    # Intento 2: 5:00 AM Lima = 10:00 AM UTC ← Respaldo por si acaso
-    - cron: '0 10 * * *'
-  workflow_dispatch:
+    - cron: '5 * * * *'  # Se ejecutará al minuto 5 de cada hora
+  workflow_dispatch:      # Permite ejecución manual
  
 jobs:
   build:
