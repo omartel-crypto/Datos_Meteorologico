@@ -39,7 +39,7 @@ def disparar_robot_github():
     owner = "omartel-crypto"
     repo = "Datos_Meteorologico"
     workflow_id = "actualizacion.yml"  # Asegúrate que este nombre coincida con tu archivo .yml
-    token = "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"           # <--- PEGA TU TOKEN CLÁSICO AQUÍ
+    token = st.secrets["GITHUB_TOKEN"]           # <--- PEGA TU TOKEN CLÁSICO AQUÍ
     
     url = f"https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches"
     headers = {
