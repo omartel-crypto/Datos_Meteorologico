@@ -31,6 +31,28 @@ CONFIG_FUNDOS = {
         "api_v2_capable": True
     }
 }
+
+# ==============================================================================
+# AGREGADO: FUNCIÓN PARA ACTIVAR EL ROBOT EN GITHUB
+# ==============================================================================
+def disparar_robot_github():
+    owner = "omartel-crypto"
+    repo = "Datos_Meteorologico"
+    workflow_id = "actualizacion.yml"  # Asegúrate que este nombre coincida con tu archivo .yml
+    token = "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"           # <--- PEGA TU TOKEN CLÁSICO AQUÍ
+    
+    url = f"https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json"
+    }
+    r = requests.post(url, headers=headers, json={"ref": "main"})
+    if r.status_code == 204:
+        st.sidebar.success("🚀 Robot activado. Datos listos en 2 min.")
+    else:
+        st.sidebar.error(f"❌ Error GitHub: {r.status_code}")
+# ==============================================================================
+
 # ─── HORA PERÚ (UTC-5) — fuente única de verdad, funciona igual en local y nube ───
 def ahora_peru():
     """Siempre retorna datetime actual en hora Perú (UTC-5), sin depender del SO."""
@@ -43,6 +65,16 @@ st.sidebar.title("Configuración")
 st.sidebar.image("logo_fundo.png", use_container_width=True)
 fundo_sel = st.sidebar.selectbox("📍 Seleccione el Fundo:", list(CONFIG_FUNDOS.keys()))
 conf = CONFIG_FUNDOS[fundo_sel]
+
+# ==============================================================================
+# AGREGADO: BOTÓN DE ACTUALIZACIÓN MANUAL EN SIDEBAR
+# ==============================================================================
+st.sidebar.divider()
+st.sidebar.write("⚙️ **Administración Robot**")
+if st.sidebar.button("🔄 Forzar Actualización del Robot", use_container_width=True):
+    disparar_robot_github()
+# ==============================================================================
+
 # ─── FUNCIÓN API (V1) ───
 def obtener_datos_v1():
     try:
