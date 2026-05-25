@@ -387,14 +387,14 @@ if conf.get("api_v2_capable"):
             hovertemplate="Hum: %{y}%<extra></extra>"
         ))
         fig_v.add_trace(go.Scatter(
-            x=df_h['H'], y=df_h['v_max'], name="Max Viento",
+            x=df_h['H'], y=df_h['v_max'], name="Max Vel. Viento - km/h",
             line=dict(color="#FFCC00", width=2),
             mode='lines+markers+text', text=df_h['v_max'],
             textposition="top center", textfont=dict(color="#996600"),
             hovertemplate="V. Máx: %{y} km/h<extra></extra>"
         ))
         fig_v.add_trace(go.Scatter(
-            x=df_h['H'], y=df_h['v_avg'], name="Prom Viento",
+            x=df_h['H'], y=df_h['v_avg'], name="Prom Vel. Viento - km/h",
             line=dict(color="#70AD47", width=3),
             mode='lines+markers+text', text=df_h['v_avg'],
             textposition="bottom center", textfont=dict(color="#385723"),
@@ -525,14 +525,14 @@ if conf.get("api_v2_capable"):
                                 hovertemplate="Hum: %{y}%<extra></extra>"
                             ))
                             fig_v.add_trace(go.Scatter(
-                                x=df_dia['fecha_str'], y=df_dia['v_max'], name="Max Viento",
+                                x=df_dia['fecha_str'], y=df_dia['v_max'], name="Max Vel. Viento - km/h",
                                 line=dict(color="#FFCC00", width=2),
                                 mode='lines+markers+text', text=df_dia['v_max'],
                                 textposition="top center", textfont=dict(color="#996600"),
                                 hovertemplate="V. Máx: %{y} km/h<extra></extra>"
                             ))
                             fig_v.add_trace(go.Scatter(
-                                x=df_dia['fecha_str'], y=df_dia['v_avg'], name="Prom Viento",
+                                x=df_dia['fecha_str'], y=df_dia['v_avg'], name="Prom Vel. Viento - km/h",
                                 line=dict(color="#70AD47", width=3),
                                 mode='lines+markers+text', text=df_dia['v_avg'],
                                 textposition="bottom center", textfont=dict(color="#385723"),
