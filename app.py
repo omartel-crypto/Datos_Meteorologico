@@ -7,10 +7,12 @@ import requests
 import time
 import hashlib
 import hmac
+
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(layout="wide", page_title="Dashboard Meteorológico", page_icon="🌡️")
 # Configurar el refresco automático cada 5 minutos (300,000 milisegundos)
 st_autorefresh(interval=300000, key="datarefresh")
+
 # --- CONFIGURACIÓN DE FUNDOS ---
 CONFIG_FUNDOS = {
     "Yaurilla": {
@@ -21,7 +23,9 @@ CONFIG_FUNDOS = {
         "sensor_lsid": 577281,
         "csv_file": "datos_yaurilla.csv",
         "color": "#1E88E5",
-        "api_v2_capable": True
+        "api_v2_capable": True,
+        "lat": -14.0797685,       
+        "lon": -75.6660536
     },
     "Los Brujos": {
         "user_v1": "001D0A808AB7",
@@ -31,7 +35,9 @@ CONFIG_FUNDOS = {
         "sensor_lsid": 11,
         "csv_file": "datos_actualizados.csv",
         "color": "#E34E26",
-        "api_v2_capable": True
+        "api_v2_capable": True,
+        "lat": -14.1563454,       
+        "lon": -75.7488786
     }
 }
 
@@ -395,8 +401,7 @@ if conf.get("api_v2_capable"):
         ))
         fig_v.add_trace(go.Scatter(
             x=df_h['H'], y=df_h['v_avg'], name="Prom Vel. Viento - km/h",
-            line=dict(color="#70AD47", width=3),
-            mode='lines+markers+text', text=df_h['v_avg'],
+            line=dict(color="#70AD47", width=3), mode='lines+markers+text', text=df_h['v_avg'],
             textposition="bottom center", textfont=dict(color="#385723"),
             hovertemplate="V. Prom: %{y} km/h<extra></extra>"
         ))
@@ -405,7 +410,7 @@ if conf.get("api_v2_capable"):
             xaxis_title="Hora", plot_bgcolor="white", height=500,
             hovermode="x unified",
             hoverlabel=dict(bgcolor="#1a1a1a", font_size=13, font_color="white"),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, itemwidth=80)
         )
         fig_v.update_xaxes(showline=True, mirror=True, gridcolor="#F5F5F5")
         fig_v.update_yaxes(showline=True, mirror=True, gridcolor="#F5F5F5")
@@ -543,7 +548,7 @@ if conf.get("api_v2_capable"):
                                 xaxis_title="Fecha", plot_bgcolor="white", height=500,
                                 hovermode="x unified",
                                 hoverlabel=dict(bgcolor="#1a1a1a", font_size=13, font_color="white"),
-                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, itemwidth=80)
                             )
                             fig_v.update_xaxes(showline=True, mirror=True, gridcolor="#F5F5F5", tickangle=-45)
                             fig_v.update_yaxes(showline=True, mirror=True, gridcolor="#F5F5F5")
@@ -581,6 +586,120 @@ if conf.get("api_v2_capable"):
 
 else:
     st.warning("API v2 no configurada.")
+
+# ==============================================================================
+# MODIFICADO Y CREATIVO: PRONÓSTICO METEOROLÓGICO CON BOTÓN E INTERFAZ UNIFICADA
+# ==============================================================================
+st.divider()
+st.subheader("📈 Pronóstico a Corto Plazo")
+
+# Botón interactivo principal para desplegar el análisis predictivo
+if st.button("🌤️ Consultar Pronóstico Proyectado de 7 Días", use_container_width=True):
+    if "lat" in conf and "lon" in conf:
+        with st.spinner(f"Estableciendo enlace satelital para Fundo {fundo_sel}..."):
+            try:
+                url_api = "https://api.open-meteo.com/v1/forecast"
+                parametros = {
+                    "latitude": conf["lat"],
+                    "longitude": conf["lon"],
+                    "daily": "temperature_2m_max,temperature_2m_min,temperature_2m_mean,relative_humidity_2m_max,rain_sum,wind_speed_10m_max,et0_fao_evapotranspiration",
+                    "timezone": "America/Lima"
+                }
+                
+                res = requests.get(url_api, params=parametros, timeout=10).json()
+                data_diaria = res.get("daily", {})
+                
+                if data_diaria:
+                    # Construcción y parseo del DataFrame predictivo
+                    df_pronostico = pd.DataFrame({
+                        "Fecha": pd.to_datetime(data_diaria.get("time")).strftime('%d-%b'),
+                        "T. Máx (°C)": [round(x, 1) for x in data_diaria.get("temperature_2m_max")],
+                        "T. Mín (°C)": [round(x, 1) for x in data_diaria.get("temperature_2m_min")],
+                        "T. Prom (°C)": [round(x, 1) for x in data_diaria.get("temperature_2m_mean")], 
+                        "Hum. Máx (%)": [round(x, 1) for x in data_diaria.get("relative_humidity_2m_max")],
+                        "Viento Máx (km/h)": [round(x, 1) for x in data_diaria.get("wind_speed_10m_max")],
+                        "Lluvia (mm)": [round(x, 1) for x in data_diaria.get("rain_sum")],
+                        "Evapotranspiración ET0 (mm)": [round(x, 2) for x in data_diaria.get("et0_fao_evapotranspiration")]
+                    })
+                    
+                    # 📈 GRÁFICO DE LÍNEAS MULTIVARIABLE (Curvas Spline continuas con Etiquetas Fijas)
+                    fig_p = go.Figure()
+                    
+                    # 1. Línea de Temp Máxima (Roja) con texto fijo
+                    fig_p.add_trace(go.Scatter(
+                        x=df_pronostico["Fecha"], y=df_pronostico["T. Máx (°C)"],
+                        name="T° Máxima", line=dict(color="#FF3333", width=3, shape="spline"),
+                        mode="lines+markers+text",
+                        text=[f"{x}°C" for x in df_pronostico["T. Máx (°C)"]],
+                        textposition="top center",
+                        hovertemplate="<b>T° Máxima: %{y}°C</b><extra></extra>"
+                    ))
+                    
+                    # 2. Línea de Temp Promedio (Naranja) con texto fijo
+                    fig_p.add_trace(go.Scatter(
+                        x=df_pronostico["Fecha"], y=df_pronostico["T. Prom (°C)"],
+                        name="T° Promedio", line=dict(color="#FF9900", width=3, shape="spline"),
+                        mode="lines+markers+text",
+                        text=[f"{x}°C" for x in df_pronostico["T. Prom (°C)"]],
+                        textposition="top center",
+                        hovertemplate="<b>T° Promedio: %{y}°C</b><extra></extra>"
+                    ))
+                    
+                    # 3. Línea de Temp Mínima (Azul) con texto fijo
+                    fig_p.add_trace(go.Scatter(
+                        x=df_pronostico["Fecha"], y=df_pronostico["T. Mín (°C)"],
+                        name="T° Mínima", line=dict(color="#3399FF", width=3, shape="spline"),
+                        mode="lines+markers+text",
+                        text=[f"{x}°C" for x in df_pronostico["T. Mín (°C)"]],
+                        textposition="bottom center",
+                        hovertemplate="<b>T° Mínima: %{y}°C</b><extra></extra>"
+                    ))
+                    
+                    # 4. Línea de Evapotranspiración (Verde Segmentada - Renombrada a ET0) con texto fijo
+                    fig_p.add_trace(go.Scatter(
+                        x=df_pronostico["Fecha"], y=df_pronostico["Evapotranspiración ET0 (mm)"],
+                        name="ET0", line=dict(color="#2ECC71", width=2.5, dash="dash", shape="spline"),
+                        mode="lines+markers+text",
+                        text=[f"{x} mm" for x in df_pronostico["Evapotranspiración ET0 (mm)"]],
+                        textposition="bottom center",
+                        hovertemplate="<b>ET0: %{y} mm</b><extra></extra>"
+                    ))
+                    
+                    # Diseño del Layout con Hover Unificado Negro (Formato Histórico)
+                    fig_p.update_layout(
+                        title=f"Tendencia Predictiva Multivariable: {fundo_sel}",
+                        plot_bgcolor="white", height=450, 
+                        hovermode="x unified",
+                        hoverlabel=dict(
+                            bgcolor="#1a1a1a", 
+                            font_size=13, 
+                            font_color="white",
+                            font_family="Arial"
+                        ),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+                    
+                    # Forzar formato limpio en eje X sin abreviaturas de días
+                    fig_p.update_xaxes(showline=True, mirror=True, gridcolor="#F5F5F5", type='category')
+                    fig_p.update_yaxes(showline=True, mirror=True, gridcolor="#F5F5F5", title_text="Unidades Métricas Atmosféricas")
+                    
+                    st.plotly_chart(fig_p, use_container_width=True)
+                    
+                    # 📋 TABLA FORMATO AGRÍCOLA (Valores optimizados a 1 decimal)
+                    st.table(df_pronostico.set_index("Fecha"))
+                    
+                    # Filtros de Alerta Automáticos
+                    viento_alerta = df_pronostico[df_pronostico["Viento Máx (km/h)"] > 20]
+                    if not viento_alerta.empty:
+                        st.warning(f"⚠️ **Alerta de Aplicaciones Fitosanitarias:** Se detectaron picos de viento superiores a 20 km/h en la proyección. Planificar ventanas seguras.")
+                        
+                else:
+                    st.error("Formato erróneo en la recepción de la data diaria.")
+            except Exception as e:
+                st.error(f"Falla de conexión con los servidores satelitales: {e}")
+    else:
+        st.warning("Coordenadas no disponibles para este fundo.")
+# ==============================================================================
 
 # ─── PIE DE PÁGINA ───
 st.divider()
