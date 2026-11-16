@@ -54,14 +54,28 @@ def preparar_pedregal(df: pd.DataFrame) -> pd.DataFrame:
     """Limpia y ordena los datos crudos de Pedregal."""
     df = df.copy()
 
-    # Hora real: 'hora' (BD mejorada 2026) y, si está vacía, 'meta-hora' (registros antiguos)
-    hora = df["hora"].astype(str).str.strip()
-    hora = hora.where(~hora.isin(["", "None", "nan", "NaT"]), None)
-    df["Hora"] = hora.fillna(df["meta-hora"].astype(str).str.strip())
+    # Hora real: 'hora' (BD mejorada 2026) y, si está vacía, 'meta-hora' (registros antiguos).
+    # Se acepta cualquier formato: "08:15", "08:15:30", "8:15 p. m.", "2026-11-10 08:15:00", etc.
+    def _extraer_hora(serie):
+        s = serie.astype(str).str.strip().str.lower()
+        m = s.str.extract(r"(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap])?\.?\s*m?")
+        h = pd.to_numeric(m[0], errors="coerce")
+        pm = m[3] == "p"
+        am = m[3] == "a"
+        h = h.where(~(pm & (h < 12)), h + 12).where(~(am & (h == 12)), 0)
+        txt = (h.astype("Int64").astype(str).str.zfill(2) + ":" + m[1] + ":" + m[2].fillna("00"))
+        return txt.where(h.notna(), None)
 
-    df["Fecha"] = pd.to_datetime(df["meta-fecha"].astype(str).str[:10], errors="coerce")
+    df["Hora"] = _extraer_hora(df["hora"]).fillna(_extraer_hora(df["meta-hora"]))
+
+    # Fecha: ISO (2026-11-10) o día/mes/año (10/11/2026)
+    f_txt = df["meta-fecha"].astype(str).str.strip()
+    fecha = pd.to_datetime(f_txt.str[:10], format="%Y-%m-%d", errors="coerce")
+    fecha = fecha.fillna(pd.to_datetime(f_txt.str[:10], format="%d/%m/%Y", errors="coerce"))
+    fecha = fecha.fillna(pd.to_datetime(f_txt, errors="coerce", format="mixed"))
+    df["Fecha"] = fecha.dt.normalize()
     df["FechaHora"] = pd.to_datetime(
-        df["Fecha"].dt.strftime("%Y-%m-%d") + " " + df["Hora"], errors="coerce"
+        df["Fecha"].dt.strftime("%Y-%m-%d") + " " + df["Hora"].fillna("00:00:00"), errors="coerce"
     )
 
     lote = df["lote-cuartel"].astype(str).str.strip().str.upper()
@@ -210,9 +224,9 @@ def _misma_fecha(f: date, anio: int):
 # ══════════════════════════════════════════════════════════════════════════════
 # GRÁFICO ESTILO POWER BI: etiquetas de valor en cada punto, sin encimarse
 # ══════════════════════════════════════════════════════════════════════════════
-ALTO_GRAF = 560
-MARGEN    = dict(l=60, r=20, t=60, b=95)
-SEP_ETIQ  = 20     # separación mínima (px) entre etiquetas del mismo punto X
+ALTO_GRAF = 500
+MARGEN    = dict(l=55, r=15, t=60, b=90)
+SEP_ETIQ  = 18     # separación mínima (px) entre etiquetas del mismo punto X
 SOBRE_PTO = 16     # cuánto sube la etiqueta sobre su punto (px)
 
 
@@ -274,7 +288,7 @@ def _grafico_pbi(tabla, clave, titulo, unidad, fondo, dec, colores, ejes, pulpa=
             x=x, y=v, text=f"<b>{txt}</b>", showarrow=True, ax=0, ay=ay,
             arrowhead=0, arrowwidth=1, standoff=5,
             arrowcolor=c if lejos else "rgba(0,0,0,0)",
-            font=dict(color="white", size=11), bgcolor=c, bordercolor="white",
+            font=dict(color="white", size=10), bgcolor=c, bordercolor="white",
             borderwidth=1, borderpad=2)
 
     # T° pulpa (rombos) — etiqueta debajo del punto
@@ -494,13 +508,18 @@ def render_cosecha(fundo_sel: str, conf: dict):
             pulpa_graf["Etiq"] = "promedio del día" if modo == "📅 Por día (rango)" else "promedio de la semana"
         pulpa_graf = pulpa_graf[pulpa_graf["Anio"].isin(anios)]
 
+    figs = []
     for clave, titulo, unidad, _, fondo, dec in VARIABLES:
         if clave == "THSW" and sin_thsw:
             continue
         fig = _grafico_pbi(tabla, clave, titulo, unidad, fondo, dec, colores, ejes,
                            pulpa=pulpa_graf if clave in ("T_Prom", "T_Max") else None)
         if fig is not None:
-            st.plotly_chart(fig, use_container_width=True)
+            figs.append(fig)
+    for i in range(0, len(figs), 2):                       # 2 gráficos por fila
+        cols = st.columns(2)
+        for col, fig in zip(cols, figs[i:i + 2]):
+            col.plotly_chart(fig, use_container_width=True)
 
     # ── PEDREGAL: T° pulpa vs ambiente ──────────────────────────────────────
     st.divider()
@@ -515,13 +534,14 @@ def render_cosecha(fundo_sel: str, conf: dict):
             g = df_p.groupby(["Anio", "X"]).agg(T_Pulpa=("T_Pulpa", "mean"),
                                                  T_Ambiente=("T_Ambiente", "mean")).reset_index()
             g["Etiq"] = "promedio"
-        for nombre, col_v, fondo in (("T° pulpa", "T_Pulpa", "#F7F3FC"),
-                                     ("T° ambiente (Pedregal)", "T_Ambiente", "#FFFFFF")):
+        cols = st.columns(2)
+        for col, (nombre, col_v, fondo) in zip(cols, (("T° pulpa", "T_Pulpa", "#F7F3FC"),
+                                                     ("T° ambiente (Pedregal)", "T_Ambiente", "#FFFFFF"))):
             t = g[["Anio", "X", col_v, "Etiq"]].rename(columns={col_v: "V"})
             t = t[t["Anio"].isin(anios)]
             fig = _grafico_pbi(t, "V", nombre, "°C", fondo, 1, colores, ejes)
             if fig is not None:
-                st.plotly_chart(fig, use_container_width=True)
+                col.plotly_chart(fig, use_container_width=True)
 
     # ── DATOS ───────────────────────────────────────────────────────────────
     with st.expander(f"📋 Ver datos de Pedregal ({fundo_sel})", expanded=False):
