@@ -4,3 +4,4 @@ plotly
 requests
 streamlit
 streamlit-autorefresh
+pyathena
