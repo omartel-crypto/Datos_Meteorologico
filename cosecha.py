@@ -139,8 +139,12 @@ def _almacen_dias():
 def _fetch_dia_api(conf: dict, fecha: date):
     """Descarga UN día de la API v2 (máx 24 h por llamada). Devuelve (registros, campos).
     Reintenta hasta 4 veces si la API responde con error o límite de consultas."""
-    t_s = int(datetime.combine(fecha, datetime.min.time()).replace(tzinfo=LIMA).timestamp())
-    t_e = t_s + 86399
+    # Cada registro de Davis marca el FINAL de su intervalo (00:15 = de 00:00 a 00:15).
+    # Por eso el día va de 00:00:01 a 24:00:00: el registro de 00:00 es del día anterior
+    # y el de 24:00 (00:00 del día siguiente) pertenece a este día.
+    medianoche = int(datetime.combine(fecha, datetime.min.time()).replace(tzinfo=LIMA).timestamp())
+    t_s = medianoche + 1
+    t_e = medianoche + 86400
     ultimo_error = ""
     for intento in range(4):
         now_ts = int(_time.time())
@@ -182,7 +186,8 @@ def _registros_a_df(registros) -> pd.DataFrame:
     if not registros:
         return pd.DataFrame()
     raw = pd.DataFrame(registros)
-    df = pd.DataFrame({"dt": pd.to_datetime(raw["ts"], unit="s") - timedelta(hours=5)})
+    # Hora Lima del INICIO del intervalo (fin − 1 s): así 01:00 cae en la hora 00 y 00:00 en el día anterior
+    df = pd.DataFrame({"dt": pd.to_datetime(raw["ts"] - 1, unit="s") - timedelta(hours=5)})
     for clave, candidatos in CAMPOS.items():
         col = next((c for c in candidatos if c in raw.columns), None)
         serie = pd.to_numeric(raw[col], errors="coerce") if col else pd.Series(float("nan"), index=raw.index)
