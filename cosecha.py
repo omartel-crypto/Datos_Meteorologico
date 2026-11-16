@@ -112,6 +112,10 @@ CAMPOS = {
     "Hum":    ["hum_last", "hum_out", "hum"],
     "THSW":   ["thsw_index", "thsw_index_last", "thsw_index_avg", "thsw_index_hi"],
     "Rad":    ["solar_rad_avg", "solar_rad", "solar_rad_last"],
+    "UV":     ["uv_index_hi", "uv_index_avg", "uv_index"],
+    "ET":     ["et"],                       # pulgadas por registro
+    "Lluvia": ["rainfall_mm"],
+    "Lluvia_in": ["rainfall_in"],
 }
 EN_FAHRENHEIT = {"T_Prom", "T_Max", "T_Min", "THSW"}
 
@@ -171,6 +175,9 @@ def _registros_a_df(registros) -> pd.DataFrame:
         if clave in EN_FAHRENHEIT:
             serie = (serie - 32) * 5 / 9
         df[clave] = serie
+    df["ET"] = df["ET"] * 25.4                                  # pulgadas → mm
+    df["Lluvia"] = df["Lluvia"].fillna(df["Lluvia_in"] * 25.4)
+    df = df.drop(columns=["Lluvia_in"])
     # Si no hay máx/mín por registro, se usan los promedios
     df["T_Max"] = df["T_Max"].fillna(df["T_Prom"])
     df["T_Min"] = df["T_Min"].fillna(df["T_Prom"])
@@ -221,42 +228,59 @@ def _misma_fecha(f: date, anio: int):
         return None
 
 
+
 # ══════════════════════════════════════════════════════════════════════════════
-# GRÁFICO ESTILO POWER BI: etiquetas de valor en cada punto, sin encimarse
+# GRÁFICO ESTILO POWER BI: etiquetas de valor en cada punto, sin choques
 # ══════════════════════════════════════════════════════════════════════════════
 ALTO_GRAF = 500
-MARGEN    = dict(l=55, r=15, t=60, b=90)
-SEP_ETIQ  = 18     # separación mínima (px) entre etiquetas del mismo punto X
-SOBRE_PTO = 16     # cuánto sube la etiqueta sobre su punto (px)
+MARGEN    = dict(l=55, r=15, t=60, b=60)
+ANCHO_EST = 620    # ancho estimado del área del gráfico (px) en media pantalla
+ALTO_ETQ  = 16     # alto de una etiqueta (px)
 
 
-def _etiquetas_sin_choque(puntos, y_lo, y_hi, alto_plot):
-    """puntos: lista de (x, valor, color, texto). Devuelve [(x, valor, color, texto, ay_px)].
-    Ordena por valor en cada X y separa las etiquetas para que no se tapen (como el DAX)."""
-    ppu = alto_plot / (y_hi - y_lo)
-    salida = []
-    por_x = {}
+def _ancho_etq(txt):
+    return 8 + 6.4 * len(txt)
+
+
+def _ubicar_etiquetas(puntos, x0, x1, y_lo, y_hi, alto_plot):
+    """Ubica cada etiqueta en el primer lugar libre (arriba/abajo de su punto) sin tapar
+    otras etiquetas ni otros puntos. puntos: dicts {x, v, txt, prioridad, abajo}.
+    Devuelve la misma lista con 'ay' (desplazamiento vertical en px, negativo = arriba)."""
+    ppx = ANCHO_EST / max(x1 - x0, 1e-9)
+    ppy = alto_plot / max(y_hi - y_lo, 1e-9)
     for p in puntos:
-        por_x.setdefault(p[0], []).append(p)
-    for x, grupo in por_x.items():
-        grupo = sorted(grupo, key=lambda p: -p[1])
-        pys = [(y_hi - p[1]) * ppu for p in grupo]            # px desde arriba
-        lys = []
-        for i, py in enumerate(pys):
-            ly = py - SOBRE_PTO
-            if lys:
-                ly = max(ly, lys[-1] + SEP_ETIQ)
-            lys.append(max(ly, 10))
-        limite = alto_plot - 10                                # que no se salgan por abajo
-        for k in range(len(lys) - 1, -1, -1):
-            lys[k] = min(lys[k], limite - (len(lys) - 1 - k) * SEP_ETIQ)
-        for p, py, ly in zip(grupo, pys, lys):
-            salida.append((*p, ly - py))
-    return salida
+        p["px"] = (p["x"] - x0) * ppx
+        p["py"] = (y_hi - p["v"]) * ppy
+    ocupado = [(p["px"] - 5, p["py"] - 5, p["px"] + 5, p["py"] + 5) for p in puntos]   # los puntos
+
+    def _choca(caja):
+        a0, b0, a1, b1 = caja
+        return any(a0 < c1 and a1 > c0 and b0 < d1 and b1 > d0 for c0, d0, c1, d1 in ocupado)
+
+    pasos = [16, 34, 52, 70, 88, 106, 124]
+    for p in sorted(puntos, key=lambda q: (q["prioridad"], q["x"], -q["v"])):
+        w = _ancho_etq(p["txt"])
+        orden = [s for d in pasos for s in ((d, -d) if p["abajo"] else (-d, d))]
+        elegido = None
+        for dy in orden:
+            cy = p["py"] + dy
+            caja = (p["px"] - w / 2, cy - ALTO_ETQ / 2, p["px"] + w / 2, cy + ALTO_ETQ / 2)
+            if cy - ALTO_ETQ / 2 < 0 or cy + ALTO_ETQ / 2 > alto_plot:
+                continue
+            if not _choca(caja):
+                elegido = (dy, caja)
+                break
+        if elegido is None:          # no hay lugar libre → no se dibuja (el valor sale al pasar el mouse)
+            p["ay"] = None
+            continue
+        p["ay"] = elegido[0]
+        ocupado.append(elegido[1])
+    return puntos
 
 
-def _grafico_pbi(tabla, clave, titulo, unidad, fondo, dec, colores, ejes, pulpa=None):
-    """tabla: columnas Anio, X (índice numérico), clave. ejes: dict con tickvals/ticktext/meses."""
+def _grafico_pbi(tabla, clave, titulo, unidad, fondo, dec, colores, ejes,
+                 pulpa=None, lineas=True):
+    """tabla: columnas Anio, X (numérico), clave, Etiq. ejes: tickvals/ticktext/meses/titulo_x."""
     datos = tabla.dropna(subset=[clave])
     if datos.empty:
         return None
@@ -265,33 +289,26 @@ def _grafico_pbi(tabla, clave, titulo, unidad, fondo, dec, colores, ejes, pulpa=
         vals += list(pulpa["V"])
     lo = math.floor(min(vals) - 0.5)
     hi = math.ceil(max(vals) + 0.5)
-    hi_plot = hi + (hi - lo) * 0.10                            # aire arriba para las etiquetas
+    lo_plot = lo - (hi - lo) * 0.08
+    hi_plot = hi + (hi - lo) * 0.15
     alto_plot = ALTO_GRAF - MARGEN["t"] - MARGEN["b"]
+    x0 = min(ejes["tickvals"]) - 0.6
+    x1 = max(ejes["tickvals"]) + 0.6
 
     fig = go.Figure()
     puntos = []
     for a in sorted(datos["Anio"].unique()):
         d = datos[datos["Anio"] == a].sort_values("X")
-        c = colores[a]
+        c = colores.get(a, "#667085")
         fig.add_trace(go.Scatter(
-            x=d["X"], y=d[clave], name=str(a), mode="lines+markers",
+            x=d["X"], y=d[clave], name=str(a), mode="lines+markers" if lineas else "markers",
             line=dict(color=c, width=2.6),
-            marker=dict(size=8, color="white", line=dict(color=c, width=2)),
+            marker=dict(size=8 if lineas else 10, color="white", line=dict(color=c, width=2.2)),
             customdata=d["Etiq"],
-            hovertemplate=f"<b>{a}</b> · %{{customdata}}: %{{y:.{dec}f}} {unidad}<extra></extra>"))
+            hovertemplate=f"<b>{a}</b> · %{{customdata}}<br>{titulo}: <b>%{{y:.{dec}f}} {unidad}</b><extra></extra>"))
         for x, v in zip(d["X"], d[clave]):
-            puntos.append((x, v, c, f"{v:.{dec}f}"))
+            puntos.append(dict(x=x, v=v, txt=f"{v:.{dec}f}", color=c, prioridad=0, abajo=False, pulpa=False))
 
-    for x, v, c, txt, ay in _etiquetas_sin_choque(puntos, lo, hi_plot, alto_plot):
-        lejos = abs(ay + SOBRE_PTO) > 8
-        fig.add_annotation(
-            x=x, y=v, text=f"<b>{txt}</b>", showarrow=True, ax=0, ay=ay,
-            arrowhead=0, arrowwidth=1, standoff=5,
-            arrowcolor=c if lejos else "rgba(0,0,0,0)",
-            font=dict(color="white", size=10), bgcolor=c, bordercolor="white",
-            borderwidth=1, borderpad=2)
-
-    # T° pulpa (rombos) — etiqueta debajo del punto
     if pulpa is not None and not pulpa.empty:
         for a in sorted(pulpa["Anio"].unique()):
             p = pulpa[pulpa["Anio"] == a]
@@ -300,46 +317,115 @@ def _grafico_pbi(tabla, clave, titulo, unidad, fondo, dec, colores, ejes, pulpa=
                 x=p["X"], y=p["V"], name=f"🍇 Pulpa {a}", mode="markers",
                 marker=dict(symbol="diamond", size=12, color=c, line=dict(color="white", width=1.5)),
                 customdata=p["Etiq"],
-                hovertemplate=f"<b>🍇 Pulpa {a}</b> · %{{customdata}}: %{{y:.1f}} °C<extra></extra>"))
+                hovertemplate=f"<b>🍇 Pulpa {a}</b> · %{{customdata}}<br>T° pulpa: <b>%{{y:.1f}} °C</b><extra></extra>"))
             for x, v in zip(p["X"], p["V"]):
-                fig.add_annotation(
-                    x=x, y=v, text=f"<b>🍇 {v:.1f}</b>", showarrow=False, yshift=-18,
-                    font=dict(color=c, size=10.5), bgcolor="white", bordercolor=c,
-                    borderwidth=1, borderpad=2)
+                puntos.append(dict(x=x, v=v, txt=f"🍇{v:.1f}", color=c, prioridad=1, abajo=True, pulpa=True))
+
+    for p in _ubicar_etiquetas(puntos, x0, x1, lo_plot, hi_plot, alto_plot):
+        if p["ay"] is None:
+            continue
+        lejos = abs(p["ay"]) > 20
+        fig.add_annotation(
+            x=p["x"], y=p["v"], text=f"<b>{p['txt']}</b>", showarrow=True, ax=0, ay=p["ay"],
+            arrowhead=0, arrowwidth=1, standoff=5,
+            arrowcolor=p["color"] if lejos else "rgba(0,0,0,0)",
+            font=dict(color=p["color"] if p["pulpa"] else "white", size=10),
+            bgcolor="white" if p["pulpa"] else p["color"],
+            bordercolor=p["color"] if p["pulpa"] else "white", borderwidth=1, borderpad=2)
 
     # Título dentro del panel
     fig.add_annotation(xref="paper", yref="paper", x=0.005, y=0.995, xanchor="left", yanchor="top",
-                       text=f"<b>{titulo.upper()}</b>", showarrow=False,
-                       font=dict(size=13, color="#1b2232"))
-    # Meses debajo de los días + línea punteada al cambiar de mes
+                       text=f"<b>{titulo.upper()}</b>  <span style='color:#7a8294'>{ejes.get('sub', '')}</span>",
+                       showarrow=False, font=dict(size=13, color="#1b2232"))
+    # Línea punteada donde cambia el mes + nombre del mes arriba
     for nombre, x_centro, x_corte in ejes.get("meses", []):
-        fig.add_annotation(x=x_centro, xref="x", y=-0.13, yref="paper", showarrow=False,
-                           text=f"<b>{nombre}</b>", font=dict(size=13.5, color="#4a5265"))
+        fig.add_annotation(x=x_centro, xref="x", y=1.0, yref="paper", yanchor="bottom", showarrow=False,
+                           text=f"<b>{nombre}</b>", font=dict(size=12, color="#4a5265"))
         if x_corte is not None:
-            fig.add_shape(type="line", x0=x_corte, x1=x_corte, xref="x", y0=-0.16, y1=1,
+            fig.add_shape(type="line", x0=x_corte, x1=x_corte, xref="x", y0=0, y1=1,
                           yref="paper", line=dict(color="#b9c0cf", width=1, dash="dash"))
 
     fig.update_layout(
         height=ALTO_GRAF, margin=MARGEN, plot_bgcolor=fondo, paper_bgcolor="white",
-        font=dict(family="Segoe UI, Arial, sans-serif"),
-        hovermode="closest",
+        font=dict(family="Segoe UI, Arial, sans-serif"), hovermode="closest",
         hoverlabel=dict(bgcolor="#1a1a1a", font_size=13, font_color="white"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                    font=dict(size=14, color="#1b2232")),
+        legend=dict(orientation="h", yanchor="bottom", y=1.06, xanchor="right", x=1,
+                    font=dict(size=13, color="#1b2232")),
     )
     fig.update_xaxes(tickmode="array", tickvals=ejes["tickvals"], ticktext=ejes["ticktext"],
-                     range=[min(ejes["tickvals"]) - 0.6, max(ejes["tickvals"]) + 0.6],
-                     showgrid=False, showline=False, zeroline=False,
-                     tickfont=dict(size=12.5, color="#1b2232"))
-    fig.update_yaxes(range=[lo, hi_plot], gridcolor="#e6e9f0", zeroline=False, showline=False,
+                     tickangle=0, range=[x0, x1], showgrid=False, showline=False, zeroline=False,
+                     tickfont=dict(size=11, color="#1b2232"),
+                     title_text=ejes.get("titulo_x", ""), title_font=dict(size=12, color="#7a8294"))
+    fig.update_yaxes(range=[lo_plot, hi_plot], gridcolor="#e6e9f0", zeroline=False, showline=False,
                      title_text=unidad, title_font=dict(size=13, color="#7a8294"),
-                     tickfont=dict(size=12, color="#7a8294"))
+                     tickfont=dict(size=11, color="#7a8294"))
     return fig
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CUADRO DE DETALLE (estilo "Reporte diario de meteorología")
+# ══════════════════════════════════════════════════════════════════════════════
+def _fmt(v, dec=2):
+    if v is None or (isinstance(v, float) and math.isnan(v)):
+        return "—"
+    return f"{v:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _cuadro_detalle(df_clima, df_p, anios, colores, titulo, subtitulo):
+    g = df_clima.groupby("Anio")
+    filas = [
+        ("Temperatura (°C)", [("Máximo", g["T_Max"].max()), ("Mínimo", g["T_Min"].min()),
+                              ("Promedio", g["T_Prom"].mean())]),
+        ("Sensación térmica THSW (°C)", [("Máximo", g["THSW"].max()), ("Promedio", g["THSW"].mean())]),
+        ("Evapotranspiración (mm)", [("Total", g["ET"].sum(min_count=1))]),
+        ("Índice UV", [("Máximo", g["UV"].max())]),
+        ("Radiación solar (W/m²)", [("Máximo", g["Rad"].max()), ("Mínimo", g["Rad"].min()),
+                                    ("Promedio", g["Rad"].mean())]),
+        ("Humedad relativa (%)", [("Máximo", g["Hum"].max()), ("Mínimo", g["Hum"].min()),
+                                  ("Promedio", g["Hum"].mean())]),
+        ("Precipitación (mm)", [("Total", g["Lluvia"].sum(min_count=1))]),
+    ]
+    if df_p is not None and not df_p.empty:
+        gp = df_p.groupby("Anio")
+        filas.append(("🍇 Cosecha — Pedregal", [
+            ("T° pulpa promedio (°C)", gp["T_Pulpa"].mean()), ("T° pulpa máxima (°C)", gp["T_Pulpa"].max()),
+            ("T° pulpa mínima (°C)", gp["T_Pulpa"].min()), ("T° ambiente promedio (°C)", gp["T_Ambiente"].mean()),
+            ("Mediciones", gp["T_Pulpa"].count())]))
+
+    th = "".join(
+        f"<th style='padding:8px 14px;text-align:center'><span style='display:inline-block;width:10px;height:10px;"
+        f"border-radius:50%;background:{colores[a]};margin-right:6px'></span>{a}</th>" for a in anios)
+    html = [
+        "<div style='border:1px solid #e6e9f0;border-radius:12px;padding:18px 20px;background:white;"
+        "font-family:Segoe UI,Arial,sans-serif'>",
+        f"<div style='font-size:20px;font-weight:700;color:#1b2232'>{titulo}</div>",
+        f"<div style='color:#4a5265;margin:4px 0 14px'>{subtitulo}</div>",
+        "<table style='width:100%;border-collapse:collapse;font-size:14px;color:#1b2232'>",
+        f"<tr style='border-bottom:2px solid #e6e9f0'><th style='text-align:left;padding:8px 14px'></th>{th}</tr>",
+    ]
+    for seccion, items in filas:
+        vals_all = [s.reindex(anios) for _, s in items]
+        if all(v.isna().all() for v in vals_all):
+            continue
+        html.append(f"<tr><td colspan='{len(anios) + 1}' style='background:#e9ecf1;font-weight:700;"
+                    f"padding:9px 14px'>{seccion}</td></tr>")
+        for nombre, serie in items:
+            serie = serie.reindex(anios)
+            dec = 0 if nombre == "Mediciones" else 2
+            celdas = "".join(f"<td style='text-align:center;padding:7px 14px;font-weight:700'>"
+                             f"{_fmt(serie.get(a), dec)}</td>" for a in anios)
+            html.append(f"<tr style='border-bottom:1px solid #f1f3f7'><td style='padding:7px 14px 7px 34px'>"
+                        f"{nombre}</td>{celdas}</tr>")
+    html.append("</table></div>")
+    st.markdown("".join(html), unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # VISTA
 # ══════════════════════════════════════════════════════════════════════════════
+MODO_HORA, MODO_DIA, MODO_SEM = "🕐 Por hora (un día)", "📅 Por día (rango)", "📆 Por semana (N° de semana)"
+
+
 def render_cosecha(fundo_sel: str, conf: dict):
     st.markdown(
         f"<h1 style='text-align:center; color:{conf['color']}; margin-bottom:0;'>"
@@ -362,151 +448,170 @@ def render_cosecha(fundo_sel: str, conf: dict):
     # ── FILTROS ─────────────────────────────────────────────────────────────
     hoy = datetime.now(LIMA).date()
     st.subheader("🔎 Filtros del comparativo")
-    modo = st.radio(
-        "Tipo de análisis:",
-        ["🕐 Por hora (un día)", "📅 Por día (rango)", "📆 Por semana (rango)"],
-        index=1, horizontal=True, key="cos_modo",
-    )
+    modo = st.radio("Tipo de análisis:", [MODO_HORA, MODO_DIA, MODO_SEM],
+                    index=1, horizontal=True, key="cos_modo")
     f1, f2, f3 = st.columns([1, 1, 2])
-    if modo == "🕐 Por hora (un día)":
+    sem_hoy = hoy.isocalendar()[1]
+    if modo == MODO_HORA:
         f_ini = f_fin = f1.date_input("📅 Fecha:", value=hoy, max_value=hoy, key="cos_fecha")
-    else:
-        f_ini = f1.date_input("📅 Desde:", value=hoy - timedelta(days=27 if "semana" in modo else 13),
-                              max_value=hoy, key="cos_desde")
+    elif modo == MODO_DIA:
+        f_ini = f1.date_input("📅 Desde:", value=hoy - timedelta(days=13), max_value=hoy, key="cos_desde")
         f_fin = f2.date_input("📅 Hasta:", value=hoy, max_value=hoy, key="cos_hasta")
+    else:
+        w_ini = int(f1.number_input("📆 Semana desde (N°):", 1, 53, max(1, sem_hoy - 3), key="cos_wini"))
+        w_fin = int(f2.number_input("📆 Semana hasta (N°):", 1, 53, sem_hoy, key="cos_wfin"))
     anios = f3.multiselect("Años a comparar:", ANIOS, default=ANIOS, key="cos_anios")
-    st.caption("Se compara **el mismo día y mes** en cada año seleccionado.")
 
-    if f_ini > f_fin:
-        st.warning("⚠️ La fecha 'Desde' debe ser anterior o igual a 'Hasta'.")
-        return
-    n_dias = (f_fin - f_ini).days + 1
-    if n_dias > 31:
-        st.warning("⚠️ El rango máximo es 31 días.")
-        return
+    if modo == MODO_SEM:
+        if w_ini > w_fin:
+            st.warning("⚠️ La semana 'desde' debe ser menor o igual a la semana 'hasta'.")
+            return
+        if w_fin - w_ini + 1 > 5:
+            st.warning("⚠️ Máximo 5 semanas por consulta.")
+            return
+        try:
+            ref_i = date.fromisocalendar(hoy.year, w_ini, 1)
+            ref_f = date.fromisocalendar(hoy.year, w_fin, 7)
+            st.caption(f"Semanas ISO (lunes a domingo). En {hoy.year}: Sem {w_ini} empieza el "
+                       f"**{ref_i.day} {MESES[ref_i.month][:3]}** y Sem {w_fin} termina el "
+                       f"**{ref_f.day} {MESES[ref_f.month][:3]}**. Se compara el mismo N° de semana en cada año.")
+        except ValueError:
+            pass
+    else:
+        st.caption("Se compara **el mismo día y mes** en cada año seleccionado.")
+        if f_ini > f_fin:
+            st.warning("⚠️ La fecha 'Desde' debe ser anterior o igual a 'Hasta'.")
+            return
+        if (f_fin - f_ini).days + 1 > 31:
+            st.warning("⚠️ El rango máximo es 31 días.")
+            return
     if not anios:
         st.info("Seleccione al menos un año.")
         return
     anios = sorted(anios)
     colores = {a: PALETA[i % len(PALETA)] for i, a in enumerate(anios)}
 
-    # ── DATOS: clima de cada año para las mismas fechas ─────────────────────
+    # ── FECHAS a consultar por año ──────────────────────────────────────────
     fechas_por_anio = {}
     for a in anios:
-        fs = [_misma_fecha(f_ini + timedelta(days=i), a) for i in range(n_dias)]
+        if modo == MODO_SEM:
+            fs = []
+            for w in range(w_ini, w_fin + 1):
+                for dd in range(1, 8):
+                    try:
+                        fs.append(date.fromisocalendar(a, w, dd))
+                    except ValueError:
+                        pass
+        else:
+            n = (f_fin - f_ini).days + 1
+            fs = [_misma_fecha(f_ini + timedelta(days=i), a) for i in range(n)]
         fs = [f for f in fs if f and f <= hoy]
         if fs:
             fechas_por_anio[a] = fs
-    todas = sorted({f for fs in fechas_por_anio.values() for f in fs})
+    fecha_a_anio = {f: a for a, fs in fechas_por_anio.items() for f in fs}
+    todas = sorted(fecha_a_anio)
+    if not todas:
+        st.info("Las fechas elegidas todavía no ocurren en los años seleccionados.")
+        return
     with st.spinner(f"Consultando {len(todas)} día(s) en la estación {fundo_sel}..."):
         df_clima, campos = obtener_dias(conf, todas)
     if df_clima.empty:
         st.error("No se encontraron datos de clima para las fechas seleccionadas.")
         return
-
-    def _dia_rel(f):
-        base = _misma_fecha(f_ini, f.year)
-        return (f - base).days if base else -1
+    for c in ("UV", "ET", "Lluvia"):
+        if c not in df_clima.columns:
+            df_clima[c] = float("nan")
 
     df_clima["Fecha"] = df_clima["dt"].dt.date
-    df_clima["Anio"]  = df_clima["dt"].dt.year
-    df_clima["Dia_Rel"] = df_clima["Fecha"].apply(_dia_rel)
-    df_clima = df_clima[(df_clima["Dia_Rel"] >= 0) & (df_clima["Dia_Rel"] < n_dias) &
-                        (df_clima["Anio"].isin(anios))]
+    df_clima["Anio"] = df_clima["Fecha"].map(fecha_a_anio)
+    df_clima = df_clima.dropna(subset=["Anio"])
+    df_clima["Anio"] = df_clima["Anio"].astype(int)
     sin_thsw = df_clima["THSW"].isna().all()
 
-    # Pedregal en las mismas fechas
     df_p = pd.DataFrame()
     if not df_ped.empty:
-        fechas_set = {f for fs in fechas_por_anio.values() for f in fs}
-        df_p = df_ped[df_ped["Fecha"].dt.date.isin(fechas_set)].copy()
+        df_p = df_ped[df_ped["Fecha"].dt.date.isin(fecha_a_anio.keys())].copy()
         if not df_p.empty:
-            df_p["Dia_Rel"] = df_p["Fecha"].dt.date.apply(_dia_rel)
-            df_p["Hora_dec"] = df_p["FechaHora"].dt.hour + df_p["FechaHora"].dt.minute / 60
+            df_p["Fecha_d"] = df_p["Fecha"].dt.date
+            df_p["Anio"] = df_p["Fecha_d"].map(fecha_a_anio).astype(int)
+            df_p = df_p[df_p["Anio"].isin(anios)]
 
     # ── AGREGACIÓN + EJE X según el modo ────────────────────────────────────
     claves = [v[0] for v in VARIABLES]
-    if modo == "🕐 Por hora (un día)":
+    if modo == MODO_HORA:
         df_clima["X"] = df_clima["dt"].dt.hour
         agg = {"T_Prom": "mean", "T_Max": "max", "T_Min": "min", "THSW": "mean", "Hum": "mean", "Rad": "mean"}
         tabla = df_clima.groupby(["Anio", "X"]).agg(agg).reset_index()
         tabla["Etiq"] = tabla["X"].apply(lambda h: f"{int(h):02d}:00")
-        ejes = {"tickvals": list(range(24)), "ticktext": [f"{h:02d}h" for h in range(24)],
-                "meses": [(f"{f_ini.day} de {MESES[f_ini.month]}", 11.5, None)]}
         etiqueta = f"{f_ini.day} de {MESES[f_ini.month]}"
+        ejes = {"tickvals": list(range(0, 24)), "ticktext": [f"{h:02d}" if h % 2 == 0 else "" for h in range(24)],
+                "titulo_x": "Hora del día", "sub": f"· {etiqueta}"}
         if not df_p.empty:
-            df_p["X"] = df_p["Hora_dec"]
-    else:
+            df_p["X"] = df_p["FechaHora"].dt.hour + df_p["FechaHora"].dt.minute / 60
+            df_p["Etiq"] = df_p["Hora"].fillna("") + " · " + df_p["Lote"]
+    elif modo == MODO_DIA:
+        dias = [f_ini + timedelta(days=i) for i in range((f_fin - f_ini).days + 1)]
+        df_clima["X"] = df_clima["Fecha"].apply(lambda f: (f - _misma_fecha(f_ini, f.year)).days
+                                                if _misma_fecha(f_ini, f.year) else -1)
         agg = {v[0]: v[3] for v in VARIABLES}
-        diario = df_clima.groupby(["Anio", "Dia_Rel"]).agg(agg).reset_index()
-        if modo == "📅 Por día (rango)":
-            tabla = diario.rename(columns={"Dia_Rel": "X"})
-            dias = [f_ini + timedelta(days=i) for i in range(n_dias)]
-            tabla["Etiq"] = tabla["X"].apply(lambda i: f"{dias[int(i)].day} {MESES[dias[int(i)].month][:3]}")
-            meses = []
-            for i, d in enumerate(dias):
-                if not meses or meses[-1][0] != d.month:
-                    meses.append([d.month, [i]])
-                else:
-                    meses[-1][1].append(i)
-            ejes = {"tickvals": list(range(n_dias)), "ticktext": [str(d.day) for d in dias],
-                    "meses": [(MESES[m], sum(ix) / len(ix), (ix[0] - 0.5) if k > 0 else None)
-                              for k, (m, ix) in enumerate(meses)]}
-            if not df_p.empty:
-                df_p["X"] = df_p["Dia_Rel"]
-        else:
-            diario["Semana"] = diario["Dia_Rel"] // 7
-            tabla = diario.groupby(["Anio", "Semana"])[claves].mean().reset_index()
-            tabla = tabla.rename(columns={"Semana": "X"})
-            n_sem = (n_dias - 1) // 7 + 1
-            ini_sem = [f_ini + timedelta(days=7 * s) for s in range(n_sem)]
-            tabla["Etiq"] = tabla["X"].apply(lambda s: f"Semana {int(s) + 1}")
-            ejes = {"tickvals": list(range(n_sem)),
-                    "ticktext": [f"Sem {s + 1}<br>{d.day} {MESES[d.month][:3]}" for s, d in enumerate(ini_sem)],
-                    "meses": []}
-            if not df_p.empty:
-                df_p["X"] = df_p["Dia_Rel"] // 7
+        tabla = df_clima.groupby(["Anio", "X"]).agg(agg).reset_index()
+        tabla["Etiq"] = tabla["X"].apply(lambda i: f"{dias[int(i)].day} {MESES[dias[int(i)].month][:3]}")
+        meses = []
+        for i, d in enumerate(dias):
+            if not meses or meses[-1][0] != d.month:
+                meses.append([d.month, [i]])
+            else:
+                meses[-1][1].append(i)
+        paso = 1 if len(dias) <= 16 else 2
+        ejes = {"tickvals": list(range(len(dias))),
+                "ticktext": [str(d.day) if i % paso == 0 else "" for i, d in enumerate(dias)],
+                "meses": [(MESES[m], sum(ix) / len(ix), (ix[0] - 0.5) if k > 0 else None)
+                          for k, (m, ix) in enumerate(meses)],
+                "titulo_x": "Día"}
         etiqueta = f"{f_ini.day} {MESES[f_ini.month][:3]} → {f_fin.day} {MESES[f_fin.month][:3]}"
+        if not df_p.empty:
+            df_p["X"] = df_p["Fecha_d"].apply(lambda f: (f - _misma_fecha(f_ini, f.year)).days)
+    else:
+        df_clima["X"] = df_clima["Fecha"].apply(lambda f: f.isocalendar()[1] - w_ini)
+        agg = {v[0]: v[3] for v in VARIABLES}
+        diario = df_clima.groupby(["Anio", "Fecha", "X"]).agg(agg).reset_index()
+        tabla = diario.groupby(["Anio", "X"])[claves].mean().reset_index()
+        tabla["Etiq"] = tabla["X"].apply(lambda s: f"Semana {int(s) + w_ini} (promedio)")
+        ejes = {"tickvals": list(range(w_fin - w_ini + 1)),
+                "ticktext": [f"Sem {w}" for w in range(w_ini, w_fin + 1)], "titulo_x": "N° de semana"}
+        etiqueta = f"Semanas {w_ini} → {w_fin}"
+        if not df_p.empty:
+            df_p["X"] = df_p["Fecha_d"].apply(lambda f: f.isocalendar()[1] - w_ini)
 
-    # ── RESUMEN COMPARATIVO POR AÑO ─────────────────────────────────────────
+    # ── CUADRO DE DETALLE ───────────────────────────────────────────────────
     st.divider()
-    st.subheader(f"📊 Comparativo por año — {etiqueta}")
-    resumen = df_clima.groupby("Anio").agg(
-        T_Prom=("T_Prom", "mean"), T_Max=("T_Max", "max"), T_Min=("T_Min", "min"),
-        THSW=("THSW", "max"), Hum=("Hum", "mean"), Rad=("Rad", "max"))
-    if not df_p.empty:
-        resumen = resumen.join(df_p.groupby("Anio").agg(
-            T_Pulpa=("T_Pulpa", "mean"), T_Amb_Ped=("T_Ambiente", "mean"), Mediciones=("T_Pulpa", "count")))
-    resumen = resumen.round(1).rename(columns={
-        "T_Prom": "T° Prom (°C)", "T_Max": "T° Máx (°C)", "T_Min": "T° Mín (°C)",
-        "THSW": "THSW máx (°C)", "Hum": "Humedad prom (%)", "Rad": "Radiación máx (W/m²)",
-        "T_Pulpa": "🍇 T° Pulpa prom (°C)", "T_Amb_Ped": "🍇 T° Amb. Pedregal (°C)",
-        "Mediciones": "🍇 Mediciones"})
-    resumen.index.name = "Año"
-    st.dataframe(resumen, use_container_width=True)
-
+    if modo == MODO_HORA:
+        sub = f"Así fue el <b>{etiqueta}</b> en cada año"
+    elif modo == MODO_DIA:
+        sub = f"Período <b>{etiqueta}</b> en cada año"
+    else:
+        sub = f"<b>{etiqueta}</b> (semanas ISO) en cada año"
+    _cuadro_detalle(df_clima, df_p, anios, colores,
+                    f"📋 Reporte comparativo — Estación {fundo_sel}", sub)
     if sin_thsw:
-        st.info("ℹ️ La API de esta estación no envió el índice THSW para estas fechas.")
-        with st.expander("Ver campos que envía la API (para revisar)"):
+        with st.expander("ℹ️ La API no envió THSW: ver campos recibidos"):
             st.write(campos)
 
-    # ── GRÁFICOS POR VARIABLE ───────────────────────────────────────────────
+    # ── GRÁFICOS POR VARIABLE (2 por fila) ──────────────────────────────────
     st.divider()
     st.subheader(f"📈 Gráficos por variable — {etiqueta}")
     mostrar_pulpa = (not df_p.empty) and st.checkbox(
         "🍇 Mostrar T° pulpa de cosecha en los gráficos de temperatura promedio y máxima",
         value=True, key="cos_pulpa")
-
     pulpa_graf = None
     if mostrar_pulpa:
-        if modo == "🕐 Por hora (un día)":
-            pulpa_graf = df_p[["Anio", "X", "T_Pulpa", "Hora"]].rename(
-                columns={"T_Pulpa": "V", "Hora": "Etiq"}).dropna(subset=["V"])
+        if modo == MODO_HORA:
+            pulpa_graf = df_p[["Anio", "X", "T_Pulpa", "Etiq"]].rename(columns={"T_Pulpa": "V"})
         else:
             pulpa_graf = df_p.groupby(["Anio", "X"])["T_Pulpa"].mean().reset_index().rename(
-                columns={"T_Pulpa": "V"}).dropna(subset=["V"])
-            pulpa_graf["Etiq"] = "promedio del día" if modo == "📅 Por día (rango)" else "promedio de la semana"
-        pulpa_graf = pulpa_graf[pulpa_graf["Anio"].isin(anios)]
+                columns={"T_Pulpa": "V"})
+            pulpa_graf["Etiq"] = "promedio del día" if modo == MODO_DIA else "promedio de la semana"
+        pulpa_graf = pulpa_graf.dropna(subset=["V"])
 
     figs = []
     for clave, titulo, unidad, _, fondo, dec in VARIABLES:
@@ -516,7 +621,7 @@ def render_cosecha(fundo_sel: str, conf: dict):
                            pulpa=pulpa_graf if clave in ("T_Prom", "T_Max") else None)
         if fig is not None:
             figs.append(fig)
-    for i in range(0, len(figs), 2):                       # 2 gráficos por fila
+    for i in range(0, len(figs), 2):
         cols = st.columns(2)
         for col, fig in zip(cols, figs[i:i + 2]):
             col.plotly_chart(fig, use_container_width=True)
@@ -527,9 +632,8 @@ def render_cosecha(fundo_sel: str, conf: dict):
     if df_p.empty:
         st.info("No hubo mediciones de cosecha (Pedregal) en estas fechas para ninguno de los años.")
     else:
-        if modo == "🕐 Por hora (un día)":
-            g = df_p.copy()
-            g["Etiq"] = g["Hora"]
+        if modo == MODO_HORA:
+            g = df_p[["Anio", "X", "T_Pulpa", "T_Ambiente", "Etiq"]].copy()
         else:
             g = df_p.groupby(["Anio", "X"]).agg(T_Pulpa=("T_Pulpa", "mean"),
                                                  T_Ambiente=("T_Ambiente", "mean")).reset_index()
@@ -538,8 +642,8 @@ def render_cosecha(fundo_sel: str, conf: dict):
         for col, (nombre, col_v, fondo) in zip(cols, (("T° pulpa", "T_Pulpa", "#F7F3FC"),
                                                      ("T° ambiente (Pedregal)", "T_Ambiente", "#FFFFFF"))):
             t = g[["Anio", "X", col_v, "Etiq"]].rename(columns={col_v: "V"})
-            t = t[t["Anio"].isin(anios)]
-            fig = _grafico_pbi(t, "V", nombre, "°C", fondo, 1, colores, ejes)
+            fig = _grafico_pbi(t, "V", nombre, "°C", fondo, 1, colores, ejes,
+                               lineas=(modo != MODO_HORA))
             if fig is not None:
                 col.plotly_chart(fig, use_container_width=True)
 
