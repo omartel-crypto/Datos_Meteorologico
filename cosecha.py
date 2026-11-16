@@ -137,31 +137,45 @@ def _almacen_dias():
 
 
 def _fetch_dia_api(conf: dict, fecha: date):
-    """Descarga UN día de la API v2 (máx 24 h por llamada). Devuelve (registros, campos)."""
+    """Descarga UN día de la API v2 (máx 24 h por llamada). Devuelve (registros, campos).
+    Reintenta hasta 4 veces si la API responde con error o límite de consultas."""
     t_s = int(datetime.combine(fecha, datetime.min.time()).replace(tzinfo=LIMA).timestamp())
     t_e = t_s + 86399
-    now_ts = int(_time.time())
-    p_hash = {
-        "api-key": conf["api_key"], "t": str(now_ts), "station-id": str(conf["station_id"]),
-        "start-timestamp": str(t_s), "end-timestamp": str(t_e),
-    }
-    msg = "".join(f"{k}{p_hash[k]}" for k in sorted(p_hash))
-    sig = hmac.new(conf["api_secret"].encode(), msg.encode(), hashlib.sha256).hexdigest()
-    r = requests.get(
-        f"https://api.weatherlink.com/v2/historic/{conf['station_id']}",
-        params={"api-key": conf["api_key"], "t": now_ts, "start-timestamp": t_s,
-                "end-timestamp": t_e, "api-signature": sig},
-        timeout=25,
-    )
-    data = r.json()
-    sensores = data.get("sensors", [])
-    sensor = next((s for s in sensores if s.get("lsid") == conf.get("sensor_lsid")), None)
-    if not sensor or not sensor.get("data"):
-        sensor = next((s for s in sensores if s.get("data") and any(
-            k in s["data"][0] for k in ("temp_out", "temp", "temp_avg"))), None)
-    if not sensor or not sensor.get("data"):
-        return [], []
-    return sensor["data"], sorted(sensor["data"][0].keys())
+    ultimo_error = ""
+    for intento in range(4):
+        now_ts = int(_time.time())
+        p_hash = {
+            "api-key": conf["api_key"], "t": str(now_ts), "station-id": str(conf["station_id"]),
+            "start-timestamp": str(t_s), "end-timestamp": str(t_e),
+        }
+        msg = "".join(f"{k}{p_hash[k]}" for k in sorted(p_hash))
+        sig = hmac.new(conf["api_secret"].encode(), msg.encode(), hashlib.sha256).hexdigest()
+        try:
+            r = requests.get(
+                f"https://api.weatherlink.com/v2/historic/{conf['station_id']}",
+                params={"api-key": conf["api_key"], "t": now_ts, "start-timestamp": t_s,
+                        "end-timestamp": t_e, "api-signature": sig},
+                timeout=25,
+            )
+            data = r.json()
+        except Exception as e:
+            ultimo_error = str(e)
+            _time.sleep(1.5 * (intento + 1))
+            continue
+        if r.status_code != 200 or "sensors" not in data:
+            ultimo_error = f"HTTP {r.status_code}: {str(data)[:150]}"
+            _time.sleep(1.5 * (intento + 1))          # límite de consultas → esperar y reintentar
+            continue
+        sensores = data.get("sensors", [])
+        # 1) el sensor configurado; 2) cualquier sensor con temperatura y datos
+        sensor = next((s for s in sensores if s.get("lsid") == conf.get("sensor_lsid") and s.get("data")), None)
+        if sensor is None:
+            sensor = next((s for s in sensores if s.get("data") and any(
+                k in s["data"][0] for k in ("temp_out", "temp", "temp_avg", "temp_last"))), None)
+        if sensor is None:
+            raise RuntimeError("la API respondió pero sin registros de temperatura para ese día")
+        return sensor["data"], sorted(sensor["data"][0].keys())
+    raise RuntimeError(ultimo_error or "sin respuesta de la API")
 
 
 def _registros_a_df(registros) -> pd.DataFrame:
@@ -185,40 +199,46 @@ def _registros_a_df(registros) -> pd.DataFrame:
 
 
 def obtener_dias(conf: dict, fechas: list) -> tuple:
-    """Trae varios días (en paralelo y con memoria). Devuelve (DataFrame, campos_recibidos)."""
+    """Trae varios días (2 en paralelo, con reintentos y memoria).
+    Devuelve (DataFrame, campos_recibidos, {fecha: error}). Solo se guardan en memoria
+    los días pasados que llegaron CON datos; los fallidos se vuelven a pedir la próxima vez."""
     almacen = _almacen_dias()
     hoy = datetime.now(LIMA).date()
-    faltan = [f for f in fechas if f >= hoy or (conf["station_id"], f.isoformat()) not in almacen]
-    campos = set(almacen.get(("_campos", conf["station_id"]), []))
+    sid = conf["station_id"]
+    faltan = [f for f in fechas if f >= hoy or (sid, f.isoformat()) not in almacen]
+    campos = set(almacen.get(("_campos", sid), []))
+    errores = {}
+    recientes = {}
 
     def _uno(f):
         try:
             regs, cps = _fetch_dia_api(conf, f)
-            return f, _registros_a_df(regs), cps
-        except Exception:
-            return f, None, []
+            return f, _registros_a_df(regs), cps, None
+        except Exception as e:
+            return f, None, [], str(e)
 
     if faltan:
-        with ThreadPoolExecutor(max_workers=4) as ex:
-            for f, df_d, cps in ex.map(_uno, faltan):
-                if df_d is None:
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            for f, df_d, cps, err in ex.map(_uno, faltan):
+                if err or df_d is None or df_d.empty:
+                    errores[f] = err or "sin registros"
                     continue
                 campos.update(cps)
                 if f < hoy:                       # el día de hoy no se guarda (sigue cambiando)
-                    almacen[(conf["station_id"], f.isoformat())] = df_d
+                    almacen[(sid, f.isoformat())] = df_d
                 else:
-                    almacen[("_hoy", conf["station_id"], f.isoformat())] = df_d
-        almacen[("_campos", conf["station_id"])] = sorted(campos)
+                    recientes[f] = df_d
+        almacen[("_campos", sid)] = sorted(campos)
 
     partes = []
     for f in fechas:
-        d = almacen.get((conf["station_id"], f.isoformat()))
+        d = recientes.get(f)
         if d is None:
-            d = almacen.get(("_hoy", conf["station_id"], f.isoformat()))
+            d = almacen.get((sid, f.isoformat()))
         if d is not None and not d.empty:
             partes.append(d)
     df = pd.concat(partes, ignore_index=True).drop_duplicates("dt") if partes else pd.DataFrame()
-    return df, sorted(campos)
+    return df, sorted(campos), errores
 
 
 def _misma_fecha(f: date, anio: int):
@@ -514,7 +534,19 @@ def render_cosecha(fundo_sel: str, conf: dict):
         st.info("Las fechas elegidas todavía no ocurren en los años seleccionados.")
         return
     with st.spinner(f"Consultando {len(todas)} día(s) en la estación {fundo_sel}..."):
-        df_clima, campos = obtener_dias(conf, todas)
+        df_clima, campos, errores = obtener_dias(conf, todas)
+    if errores:
+        dias_txt = ", ".join(f"{f:%d-%m-%Y}" for f in sorted(errores))
+        st.warning(f"⚠️ No se pudo traer el clima de: {dias_txt}. "
+                   "Presione **🔄 Volver a consultar clima** para reintentarlo.")
+        with st.expander("Ver detalle del error de la API"):
+            for f in sorted(errores):
+                st.write(f"{f:%d-%m-%Y}: {errores[f]}")
+    if st.button("🔄 Volver a consultar clima", key="cos_reintentar"):
+        alm = _almacen_dias()
+        for f in todas:
+            alm.pop((conf["station_id"], f.isoformat()), None)
+        st.rerun()
     if df_clima.empty:
         st.error("No se encontraron datos de clima para las fechas seleccionadas.")
         return
