@@ -85,6 +85,17 @@ if st.sidebar.button("🔄 Forzar Actualización del Robot", use_container_width
     disparar_robot_github()
 # ==============================================================================
 
+# ==============================================================================
+# AGREGADO: SELECTOR DE VISTA (CLIMA / COSECHA)
+# ==============================================================================
+st.sidebar.divider()
+vista = st.sidebar.radio("🗂️ **Vista**", ["🌡️ CLIMA", "🍇 COSECHA"], horizontal=True)
+if vista == "🍇 COSECHA":
+    from cosecha import render_cosecha
+    render_cosecha(fundo_sel, conf)
+    st.stop()
+# ==============================================================================
+
 # ─── FUNCIÓN API (V1) ───
 def obtener_datos_v1():
     try:
