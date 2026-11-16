@@ -124,9 +124,9 @@ VARIABLES = [
     ("T_Prom", "Temperatura promedio",       "°C",   "mean", "#FFFFFF", 1),
     ("T_Max",  "Temperatura máxima",         "°C",   "max",  "#FFF5F5", 1),
     ("T_Min",  "Temperatura mínima",         "°C",   "min",  "#F3F6FD", 1),
-    ("THSW",   "Sensación térmica (THSW)",   "°C",   "max",  "#FFF8EE", 1),
+    ("THSW",   "Sensación térmica (THSW)",   "°C",   "mean", "#FFF8EE", 1),
     ("Hum",    "Humedad relativa",           "%",    "mean", "#F0F9FF", 0),
-    ("Rad",    "Radiación solar",            "W/m²", "max",  "#FFFBEA", 0),
+    ("Rad",    "Radiación solar promedio",   "W/m²", "mean", "#FFFBEA", 0),
 ]
 
 
@@ -277,7 +277,7 @@ def _ubicar_etiquetas(puntos, x0, x1, y_lo, y_hi, alto_plot):
         a0, b0, a1, b1 = caja
         return any(a0 < c1 and a1 > c0 and b0 < d1 and b1 > d0 for c0, d0, c1, d1 in ocupado)
 
-    pasos = [16, 34, 52, 70, 88, 106, 124]
+    pasos = [16, 32, 48, 64]
     for p in sorted(puntos, key=lambda q: (q["prioridad"], q["x"], -q["v"])):
         w = _ancho_etq(p["txt"])
         orden = [s for d in pasos for s in ((d, -d) if p["abajo"] else (-d, d))]
@@ -355,7 +355,7 @@ def _grafico_pbi(tabla, clave, titulo, unidad, fondo, dec, colores, ejes,
 
     # Título dentro del panel
     fig.add_annotation(xref="paper", yref="paper", x=0.005, y=0.995, xanchor="left", yanchor="top",
-                       text=f"<b>{titulo.upper()}</b>  <span style='color:#7a8294'>{ejes.get('sub', '')}</span>",
+                       text=f"<b>{titulo.upper()} ({unidad})</b>  <span style='color:#7a8294'>{ejes.get('sub', '')}</span>",
                        showarrow=False, font=dict(size=13, color="#1b2232"))
     # Línea punteada donde cambia el mes + nombre del mes arriba
     for nombre, x_centro, x_corte in ejes.get("meses", []):
@@ -579,8 +579,7 @@ def render_cosecha(fundo_sel: str, conf: dict):
         ejes = {"tickvals": list(range(0, 24)), "ticktext": [f"{h:02d}" if h % 2 == 0 else "" for h in range(24)],
                 "titulo_x": "Hora del día", "sub": f"· {etiqueta}"}
         if not df_p.empty:
-            df_p["X"] = df_p["FechaHora"].dt.hour + df_p["FechaHora"].dt.minute / 60
-            df_p["Etiq"] = df_p["Hora"].fillna("") + " · " + df_p["Lote"]
+            df_p["X"] = df_p["FechaHora"].dt.hour
     elif modo == MODO_DIA:
         dias = [f_ini + timedelta(days=i) for i in range((f_fin - f_ini).days + 1)]
         df_clima["X"] = df_clima["Fecha"].apply(lambda f: (f - _misma_fecha(f_ini, f.year)).days
@@ -636,13 +635,10 @@ def render_cosecha(fundo_sel: str, conf: dict):
         "🍇 Mostrar T° pulpa de cosecha en los gráficos de temperatura promedio y máxima",
         value=True, key="cos_pulpa")
     pulpa_graf = None
+    nombre_periodo = {MODO_HORA: "de la hora", MODO_DIA: "del día", MODO_SEM: "de la semana"}[modo]
     if mostrar_pulpa:
-        if modo == MODO_HORA:
-            pulpa_graf = df_p[["Anio", "X", "T_Pulpa", "Etiq"]].rename(columns={"T_Pulpa": "V"})
-        else:
-            pulpa_graf = df_p.groupby(["Anio", "X"])["T_Pulpa"].mean().reset_index().rename(
-                columns={"T_Pulpa": "V"})
-            pulpa_graf["Etiq"] = "promedio del día" if modo == MODO_DIA else "promedio de la semana"
+        pulpa_graf = df_p.groupby(["Anio", "X"]).agg(V=("T_Pulpa", "mean"), n=("T_Pulpa", "count")).reset_index()
+        pulpa_graf["Etiq"] = pulpa_graf["n"].apply(lambda n: f"promedio {nombre_periodo} ({n} muestras)")
         pulpa_graf = pulpa_graf.dropna(subset=["V"])
 
     figs = []
@@ -664,18 +660,14 @@ def render_cosecha(fundo_sel: str, conf: dict):
     if df_p.empty:
         st.info("No hubo mediciones de cosecha (Pedregal) en estas fechas para ninguno de los años.")
     else:
-        if modo == MODO_HORA:
-            g = df_p[["Anio", "X", "T_Pulpa", "T_Ambiente", "Etiq"]].copy()
-        else:
-            g = df_p.groupby(["Anio", "X"]).agg(T_Pulpa=("T_Pulpa", "mean"),
-                                                 T_Ambiente=("T_Ambiente", "mean")).reset_index()
-            g["Etiq"] = "promedio"
+        g = df_p.groupby(["Anio", "X"]).agg(T_Pulpa=("T_Pulpa", "mean"), T_Ambiente=("T_Ambiente", "mean"),
+                                             n=("T_Pulpa", "count")).reset_index()
+        g["Etiq"] = g["n"].apply(lambda n: f"promedio {nombre_periodo} ({n} muestras)")
         cols = st.columns(2)
-        for col, (nombre, col_v, fondo) in zip(cols, (("T° pulpa", "T_Pulpa", "#F7F3FC"),
-                                                     ("T° ambiente (Pedregal)", "T_Ambiente", "#FFFFFF"))):
+        for col, (nombre, col_v, fondo) in zip(cols, (("T° pulpa promedio", "T_Pulpa", "#F7F3FC"),
+                                                     ("T° ambiente promedio (Pedregal)", "T_Ambiente", "#FFFFFF"))):
             t = g[["Anio", "X", col_v, "Etiq"]].rename(columns={col_v: "V"})
-            fig = _grafico_pbi(t, "V", nombre, "°C", fondo, 1, colores, ejes,
-                               lineas=(modo != MODO_HORA))
+            fig = _grafico_pbi(t, "V", nombre, "°C", fondo, 1, colores, ejes)
             if fig is not None:
                 col.plotly_chart(fig, use_container_width=True)
 
