@@ -9,8 +9,7 @@ import pandas as pd
 ATHENA_REGION    = "us-west-1"
 ATHENA_SCHEMA    = "db_5ea71f72-3461-411b-870e-31b312829059"
 ATHENA_WORKGROUP = "wg_5ea71f72-3461-411b-870e-31b312829059"
-# Inicio del nombre de la tabla (el nombre completo se busca solo, porque ODBC/Power BI lo muestran cortado)
-ATHENA_TABLA_PREFIJO = "table_ica-pedregal_uva_temperaturas-campo-vid"
+ATHENA_TABLA     = "table_ica-pedregal_uva_temperaturas-campo-vid_96f3cde2-ea67-4928-b3ec-0ae2ab22df2d"
 
 # Fundos de Pedregal que se miden con la estación Yaurilla. El resto → Los Brujos.
 FUNDOS_YAURILLA = {"YAURILLA", "ORONGO", "SAN JUAN", "LA BOLIVAR"}
@@ -29,21 +28,9 @@ def cargar_pedregal():
     )
     cur = conn.cursor()
 
-    # 1) Buscar el nombre completo de la tabla
-    cur.execute(f'''
-        SELECT table_name FROM information_schema.tables
-        WHERE table_schema = '{ATHENA_SCHEMA}'
-          AND table_name LIKE '{ATHENA_TABLA_PREFIJO}%'
-    ''')
-    tablas = [r[0] for r in cur.fetchall()]
-    if not tablas:
-        raise RuntimeError(f"No se encontró ninguna tabla que empiece con '{ATHENA_TABLA_PREFIJO}'")
-    tabla = sorted(tablas)[0]
-
-    # 2) Traer los datos
     sql = f'''
         SELECT "meta-fecha", "meta-hora", "hora", "lote-cuartel", "t-pulpa", "t-ambiente"
-        FROM "{ATHENA_SCHEMA}"."{tabla}"
+        FROM "{ATHENA_SCHEMA}"."{ATHENA_TABLA}"
     '''
     cur.execute(sql)
     columnas = [c[0] for c in cur.description]
