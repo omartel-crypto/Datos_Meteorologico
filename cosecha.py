@@ -98,8 +98,8 @@ def preparar_pedregal(df: pd.DataFrame) -> pd.DataFrame:
 # PARTE 2 — CLIMA DE LA ESTACIÓN (API WeatherLink v2) PARA COMPARAR AÑOS
 # ══════════════════════════════════════════════════════════════════════════════
 ANIOS        = [2023, 2024, 2025, 2026]
-# Misma paleta que el reporte de Power BI (se asigna por orden de los años elegidos)
-PALETA       = ["#12A37F", "#2B3A8C", "#E5484D", "#F5A524", "#8E4EC6"]
+# Colores FIJOS por año (no cambian aunque se elijan otros años)
+COLOR_ANIO   = {2023: "#12A37F", 2024: "#F5A524", 2025: "#2B3A8C", 2026: "#E5484D", 2027: "#8E4EC6"}
 MESES        = ["", "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
                 "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
 LIMA         = timezone(timedelta(hours=-5))
@@ -271,7 +271,8 @@ def _ubicar_etiquetas(puntos, x0, x1, y_lo, y_hi, alto_plot):
     for p in puntos:
         p["px"] = (p["x"] - x0) * ppx
         p["py"] = (y_hi - p["v"]) * ppy
-    ocupado = [(p["px"] - 5, p["py"] - 5, p["px"] + 5, p["py"] + 5) for p in puntos]   # los puntos
+    ocupado = [(p["px"] - r, p["py"] - r, p["px"] + r, p["py"] + r)                       # los puntos
+               for p in puntos for r in [8 if p.get("pulpa") else 5]]
 
     def _choca(caja):
         a0, b0, a1, b1 = caja
@@ -290,6 +291,10 @@ def _ubicar_etiquetas(puntos, x0, x1, y_lo, y_hi, alto_plot):
             if not _choca(caja):
                 elegido = (dy, caja)
                 break
+        if elegido is None and p.get("pulpa"):        # la pulpa SIEMPRE lleva etiqueta
+            dy = orden[0]
+            cy = p["py"] + dy
+            elegido = (dy, (p["px"] - w / 2, cy - ALTO_ETQ / 2, p["px"] + w / 2, cy + ALTO_ETQ / 2))
         if elegido is None:          # no hay lugar libre → no se dibuja (el valor sale al pasar el mouse)
             p["ay"] = None
             continue
@@ -299,7 +304,7 @@ def _ubicar_etiquetas(puntos, x0, x1, y_lo, y_hi, alto_plot):
 
 
 def _grafico_pbi(tabla, clave, titulo, unidad, fondo, dec, colores, ejes,
-                 pulpa=None, lineas=True):
+                 pulpa=None, lineas=True, sufijo=""):
     """tabla: columnas Anio, X (numérico), clave, Etiq. ejes: tickvals/ticktext/meses/titulo_x."""
     datos = tabla.dropna(subset=[clave])
     if datos.empty:
@@ -321,13 +326,13 @@ def _grafico_pbi(tabla, clave, titulo, unidad, fondo, dec, colores, ejes,
         d = datos[datos["Anio"] == a].sort_values("X")
         c = colores.get(a, "#667085")
         fig.add_trace(go.Scatter(
-            x=d["X"], y=d[clave], name=str(a), mode="lines+markers" if lineas else "markers",
+            x=d["X"], y=d[clave], name=f"{a}{sufijo}", mode="lines+markers" if lineas else "markers",
             line=dict(color=c, width=2.6),
             marker=dict(size=8 if lineas else 10, color="white", line=dict(color=c, width=2.2)),
             customdata=d["Etiq"],
             hovertemplate=f"<b>{a}</b> · %{{customdata}}<br>{titulo}: <b>%{{y:.{dec}f}} {unidad}</b><extra></extra>"))
         for x, v in zip(d["X"], d[clave]):
-            puntos.append(dict(x=x, v=v, txt=f"{v:.{dec}f}", color=c, prioridad=0, abajo=False, pulpa=False))
+            puntos.append(dict(x=x, v=v, txt=f"{v:.{dec}f}", color=c, prioridad=1, abajo=False, pulpa=False))
 
     if pulpa is not None and not pulpa.empty:
         for a in sorted(pulpa["Anio"].unique()):
@@ -339,7 +344,7 @@ def _grafico_pbi(tabla, clave, titulo, unidad, fondo, dec, colores, ejes,
                 customdata=p["Etiq"],
                 hovertemplate=f"<b>🍇 Pulpa {a}</b> · %{{customdata}}<br>T° pulpa: <b>%{{y:.1f}} °C</b><extra></extra>"))
             for x, v in zip(p["X"], p["V"]):
-                puntos.append(dict(x=x, v=v, txt=f"🍇{v:.1f}", color=c, prioridad=1, abajo=True, pulpa=True))
+                puntos.append(dict(x=x, v=v, txt=f"🍇{v:.1f}", color=c, prioridad=0, abajo=True, pulpa=True))
 
     for p in _ubicar_etiquetas(puntos, x0, x1, lo_plot, hi_plot, alto_plot):
         if p["ay"] is None:
@@ -366,7 +371,7 @@ def _grafico_pbi(tabla, clave, titulo, unidad, fondo, dec, colores, ejes,
                           yref="paper", line=dict(color="#b9c0cf", width=1, dash="dash"))
 
     fig.update_layout(
-        height=ALTO_GRAF, margin=MARGEN, plot_bgcolor=fondo, paper_bgcolor="white",
+        height=ALTO_GRAF, margin=MARGEN, plot_bgcolor=fondo, paper_bgcolor="white", showlegend=True,
         font=dict(family="Segoe UI, Arial, sans-serif"), hovermode="closest",
         hoverlabel=dict(bgcolor="#1a1a1a", font_size=13, font_color="white"),
         legend=dict(orientation="h", yanchor="bottom", y=1.06, xanchor="right", x=1,
@@ -509,7 +514,7 @@ def render_cosecha(fundo_sel: str, conf: dict):
         st.info("Seleccione al menos un año.")
         return
     anios = sorted(anios)
-    colores = {a: PALETA[i % len(PALETA)] for i, a in enumerate(anios)}
+    colores = {a: COLOR_ANIO.get(a, "#667085") for a in anios}
 
     # ── FECHAS a consultar por año ──────────────────────────────────────────
     fechas_por_anio = {}
@@ -664,10 +669,11 @@ def render_cosecha(fundo_sel: str, conf: dict):
                                              n=("T_Pulpa", "count")).reset_index()
         g["Etiq"] = g["n"].apply(lambda n: f"promedio {nombre_periodo} ({n} muestras)")
         cols = st.columns(2)
-        for col, (nombre, col_v, fondo) in zip(cols, (("T° pulpa promedio", "T_Pulpa", "#F7F3FC"),
-                                                     ("T° ambiente promedio (Pedregal)", "T_Ambiente", "#FFFFFF"))):
+        for col, (nombre, col_v, fondo, suf) in zip(cols, (
+                ("T° pulpa promedio", "T_Pulpa", "#F7F3FC", " · pulpa"),
+                ("T° ambiente promedio (Pedregal)", "T_Ambiente", "#FFFFFF", " · ambiente"))):
             t = g[["Anio", "X", col_v, "Etiq"]].rename(columns={col_v: "V"})
-            fig = _grafico_pbi(t, "V", nombre, "°C", fondo, 1, colores, ejes)
+            fig = _grafico_pbi(t, "V", nombre, "°C", fondo, 1, colores, ejes, sufijo=suf)
             if fig is not None:
                 col.plotly_chart(fig, use_container_width=True)
 
